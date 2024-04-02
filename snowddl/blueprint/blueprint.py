@@ -65,6 +65,7 @@ class DatabaseBlueprint(AbstractBlueprint):
     is_transient: Optional[bool] = None
     retention_time: Optional[int] = None
     is_sandbox: Optional[bool] = None
+    copy_schema_role_grants_to_db_clones: List[str] = []
 
 
 class DatabaseShareBlueprint(AbstractBlueprint):

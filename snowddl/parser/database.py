@@ -17,6 +17,12 @@ database_json_schema = {
         },
         "comment": {
             "type": "string"
+        },
+        "copy_schema_role_grants_to_db_clones": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
         }
     },
     "additionalProperties": False
@@ -42,6 +48,7 @@ class DatabaseParser(AbstractParser):
                 retention_time=params.get("retention_time", None),
                 is_sandbox=params.get("is_sandbox", False),
                 comment=params.get("comment", None),
+                copy_schema_role_grants_to_db_clones=params.get("copy_schema_role_grants_to_db_clones", [])
             )
 
             self.config.add_blueprint(bp)
