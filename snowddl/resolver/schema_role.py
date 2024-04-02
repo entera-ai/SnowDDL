@@ -2,6 +2,7 @@ from snowddl.blueprint import (
     DatabaseIdent,
     DatabaseBlueprint,
     SchemaRoleBlueprint,
+    SchemaIdent,
     SchemaBlueprint,
     Grant,
     FutureGrant,
