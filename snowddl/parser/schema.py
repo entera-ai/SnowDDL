@@ -128,6 +128,7 @@ class SchemaParser(AbstractParser):
                     "is_transient": database_params.get("is_transient", False) or schema_params.get("is_transient", False),
                     "retention_time": schema_params.get("retention_time"),
                     "is_sandbox": database_params.get("is_sandbox", False) or schema_params.get("is_sandbox", False),
+                    "schema_roles": schema_params.get("schema_roles") or database_params.get("schema_roles", [])
                 }
 
                 owner_additional_grants = []
@@ -147,7 +148,7 @@ class SchemaParser(AbstractParser):
                     retention_time=combined_params.get("retention_time", None),
                     is_sandbox=combined_params.get("is_sandbox", False),
                     owner_additional_grants=owner_additional_grants,
-                    schema_roles=schema_params.get("schema_roles", []),
+                    schema_roles=combined_params.get("schema_roles", []),
                     comment=schema_params.get("comment", None),
                 )
 
