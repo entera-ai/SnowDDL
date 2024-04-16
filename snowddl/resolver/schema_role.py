@@ -1,3 +1,5 @@
+from typing import List, Dict, Union
+
 from snowddl.blueprint import (
     DatabaseIdent,
     DatabaseBlueprint,
@@ -74,21 +76,92 @@ class SchemaRoleResolver(AbstractRoleResolver):
 
         return database_identifiers
 
+    def filter_default_schema_role_object_grants(
+        self,
+        schema_roles: Union[List[str], Dict[dict, dict]],
+        schema_role_type: str,
+        grant_type: str,
+        object_type_iterable: Union[List[ObjectType], Dict[ObjectType, List[str]]]
+    ) -> Union[List[ObjectType], Dict[ObjectType, List[str]]]:
+        """
+        Takes a list of ObjectType(s) or ObjectType:privilege mappings, and filters
+        them according to values in SchemaBlueprint.schema_roles attribute. By default
+        a full set of ObjectTypes and privileges are defined in each respective
+        get_blueprint_*_role() method. If SchemaBlueprint.schema_roles is a list, these
+        grants are all applied to the listed roles. However, if SchemaBlueprint.schema_roles
+        is a dict containing custom grants, defaults are filtered according to those grants
+        Args:
+            - schema_roles: list of schema role types (e.g 'owner' / 'read' / 'write')
+                or dict of schema role types with grant customizations (e.g.
+                {'owner': {'create': ['TABLE'], 'ownership': ['TABLE']}}, . . .)
+            - schema_role_type: 'owner', 'read', or 'write'
+            - grant_type: 'create', 'ownership', or 'privileges'. 'privileges' refers
+                to grants on pre-existing objects
+            - object_type_iterable: list of ObjectTypes or dict of ObjectType:[privileges]
+                from get_blueprint_*_role() methods
+        Returns:
+            - filtered representation of object_type_iterable, containing only values
+                which match SchemaBlueprint.schema_roles attribute
+        """
+        has_default_grants = isinstance(schema_roles, list)
+        has_custom_grants = isinstance(schema_roles, dict)
+
+        if has_default_grants:
+            filtered_objects = object_type_iterable
+
+        elif has_custom_grants:
+            custom_grants = schema_roles[schema_role_type] or schema_roles[schema_role_type.upper()]
+            custom_grant_objects = custom_grants[grant_type] or custom_grants[grant_type.upper()]
+
+            if grant_type in ["create", "ownership"]:
+                # custom_grant_objects is a list of strings representing object types, just compare 
+                # to object_type_iterable to see which grants need to be applied
+                standardized_custom_grant_objects = [obj.upper() for obj in custom_grant_objects]
+                filtered_objects = [
+                    obj for obj in object_type_iterable 
+                    if obj.singular in standardized_custom_grant_objects
+                    or obj.plural in standardized_custom_grant_objects
+                ]
+            elif grant_type == "privileges":
+                # custom_grant_objects is a dict of object:privilege mappings
+                # {"OBJECT_TYPE": ["privilege1", "privilege2", . . .]}
+                standardized_custom_privilege_grants = {
+                    obj: [privilege.upper() for privilege in custom_grant_objects[obj]]
+                    for obj in custom_grant_objects
+                }
+                filtered_objects = {}
+                for obj in object_type_iterable:
+                    if obj.plural in standardized_custom_privilege_grants:
+                        filtered_objects[obj] = [
+                            grant.upper() for grant in standardized_custom_privilege_grants[obj.plural]
+                            if grant.upper() in object_type_iterable[obj]
+                        ]
+
+        return filtered_objects
+
     def get_blueprint_owner_role(self, schema_bp: SchemaBlueprint):
         grants = []
         future_grants = []
 
         database_identifiers = self.gather_db_identifiers_for_schema_role_grants(schema_bp)
 
-        create_object_types = [
+        schema_roles = schema_bp.schema_roles
+
+        default_create_object_types = [
             ObjectType.FILE_FORMAT,
             ObjectType.FUNCTION,
             ObjectType.PROCEDURE,
             ObjectType.TABLE,
             ObjectType.VIEW,
         ]
+        filtered_create_object_types = self.filter_default_schema_role_object_grants(
+            schema_roles=schema_roles,
+            schema_role_type="owner",
+            grant_type="create",
+            object_type_iterable=default_create_object_types
+        )
 
-        ownership_object_types = [
+        default_ownership_object_types = [
             ObjectType.EXTERNAL_TABLE,
             ObjectType.FILE_FORMAT,
             ObjectType.FUNCTION,
@@ -101,11 +174,23 @@ class SchemaRoleResolver(AbstractRoleResolver):
             ObjectType.TASK,
             ObjectType.VIEW,
         ]
+        filtered_ownership_object_types = self.filter_default_schema_role_object_grants(
+            schema_roles=schema_roles,
+            schema_role_type="owner",
+            grant_type="ownership",
+            object_type_iterable=default_ownership_object_types
+        )
 
-        privileges_map = {
+        default_privileges_map = {
             ObjectType.DYNAMIC_TABLE: ["MONITOR", "OPERATE", "SELECT"],
             ObjectType.STAGE: ["READ", "WRITE", "USAGE"],
         }
+        filtered_privileges_map = self.filter_default_schema_role_object_grants(
+            schema_roles=schema_roles,
+            schema_role_type="owner",
+            grant_type="privileges",
+            object_type_iterable=default_privileges_map
+        )
 
         for database_identifier in database_identifiers:
             grants.append(
@@ -130,7 +215,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
                 )
             )
 
-            for object_type in create_object_types:
+            for object_type in filtered_create_object_types:
                 grants.append(
                     Grant(
                         privilege=f"CREATE {object_type.singular}",
@@ -139,7 +224,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
                     )
                 )
 
-            for object_type in ownership_object_types:
+            for object_type in filtered_ownership_object_types:
                 future_grants.append(
                     FutureGrant(
                         privilege="OWNERSHIP",
@@ -148,7 +233,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
                     )
                 )
 
-            for object_type, privileges in privileges_map.items():
+            for object_type, privileges in filtered_privileges_map.items():
                 for privilege in privileges:
                     future_grants.append(
                         FutureGrant(
@@ -184,7 +269,9 @@ class SchemaRoleResolver(AbstractRoleResolver):
 
         database_identifiers = self.gather_db_identifiers_for_schema_role_grants(schema_bp)
 
-        privileges_map = {
+        schema_roles = schema_bp.schema_roles
+
+        default_privileges_map = {
             ObjectType.DYNAMIC_TABLE: ["SELECT"],
             ObjectType.EXTERNAL_TABLE: ["SELECT", "REFERENCES"],
             ObjectType.FILE_FORMAT: ["USAGE"],
@@ -196,6 +283,12 @@ class SchemaRoleResolver(AbstractRoleResolver):
             ObjectType.TABLE: ["SELECT", "REFERENCES"],
             ObjectType.VIEW: ["SELECT", "REFERENCES"],
         }
+        filtered_privileges_map = self.filter_default_schema_role_object_grants(
+            schema_roles=schema_roles,
+            schema_role_type="read",
+            grant_type="privileges",
+            object_type_iterable=default_privileges_map
+        )
 
         for database_identifier in database_identifiers:
             grants.append(
@@ -220,7 +313,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
                 )
             )
 
-            for object_type, privileges in privileges_map.items():
+            for object_type, privileges in filtered_privileges_map.items():
                 for privilege in privileges:
                     future_grants.append(
                         FutureGrant(
@@ -246,11 +339,19 @@ class SchemaRoleResolver(AbstractRoleResolver):
 
         database_identifiers = self.gather_db_identifiers_for_schema_role_grants(schema_bp)
 
-        privileges_map = {
+        schema_roles = schema_bp.schema_roles
+
+        default_privileges_map = {
             ObjectType.STAGE: ["READ", "WRITE"],
             ObjectType.SEQUENCE: ["USAGE"],
             ObjectType.TABLE: ["INSERT", "UPDATE", "DELETE", "TRUNCATE"],
         }
+        filtered_privileges_map = self.filter_default_schema_role_object_grants(
+            schema_roles=schema_roles,
+            schema_role_type="write",
+            grant_type="privileges",
+            object_type_iterable=default_privileges_map
+        )
 
         for database_identifier in database_identifiers:
             grants.append(
@@ -275,7 +376,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
                 )
             )
 
-            for object_type, privileges in privileges_map.items():
+            for object_type, privileges in filtered_privileges_map.items():
                 for privilege in privileges:
                     future_grants.append(
                         FutureGrant(
