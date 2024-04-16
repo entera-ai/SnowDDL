@@ -145,6 +145,8 @@ class SchemaRoleResolver(AbstractRoleResolver):
 
         database_identifiers = self.gather_db_identifiers_for_schema_role_grants(schema_bp)
 
+        # TODO: inherit schema_roles from DatabaseBlueprint, so feature is available from
+        # Python config. Currently only available from YAML config by overloading parser
         schema_roles = schema_bp.schema_roles
 
         default_create_object_types = [
@@ -269,6 +271,8 @@ class SchemaRoleResolver(AbstractRoleResolver):
 
         database_identifiers = self.gather_db_identifiers_for_schema_role_grants(schema_bp)
 
+        # TODO: inherit schema_roles from DatabaseBlueprint, so feature is available from
+        # Python config. Currently only available from YAML config by overloading parser
         schema_roles = schema_bp.schema_roles
 
         default_privileges_map = {
@@ -339,6 +343,8 @@ class SchemaRoleResolver(AbstractRoleResolver):
 
         database_identifiers = self.gather_db_identifiers_for_schema_role_grants(schema_bp)
 
+        # TODO: inherit schema_roles from DatabaseBlueprint, so feature is available from
+        # Python config. Currently only available from YAML config by overloading parser
         schema_roles = schema_bp.schema_roles
 
         default_privileges_map = {

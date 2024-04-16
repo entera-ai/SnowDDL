@@ -66,6 +66,10 @@ class DatabaseBlueprint(AbstractBlueprint):
     retention_time: Optional[int] = None
     is_sandbox: Optional[bool] = None
     copy_schema_role_grants_to_db_clones: List[str] = []
+    # TODO: add schema_roles to blueprint and update SchemaRoleResolver
+    # to inherit config from db blueprint, so feature is available from
+    # Python config. Currently only available from YAML config
+    # schema_roles: Union[dict, List[str], bool] = []
 
 
 class DatabaseShareBlueprint(AbstractBlueprint):
