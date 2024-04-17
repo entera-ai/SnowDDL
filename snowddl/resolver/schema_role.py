@@ -111,7 +111,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
 
         elif has_custom_grants:
             custom_grants = schema_roles[schema_role_type] or schema_roles[schema_role_type.upper()]
-            custom_grant_objects = custom_grants[grant_type] or custom_grants[grant_type.upper()]
+            custom_grant_objects = custom_grants.get(grant_type) or custom_grants.get(grant_type.upper(), [])
 
             if grant_type in ["create", "ownership"]:
                 # custom_grant_objects is a list of strings representing object types, just compare 
