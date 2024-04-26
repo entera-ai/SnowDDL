@@ -1,5 +1,11 @@
 # SnowDDL
 
+## This is a Fork of https://github.com/littleK0i/SnowDDL
+
+See `Customizations` section for descriptions of changes, enhancements, etc.
+
+## Overview
+
 [![PyPI](https://badge.fury.io/py/snowddl.svg)](https://badge.fury.io/py/snowddl)
 [![Getting Started](https://github.com/littleK0i/SnowDDL/actions/workflows/getting_started.yml/badge.svg)](https://github.com/littleK0i/SnowDDL/actions/workflows/getting_started.yml)
 [![Pytest](https://github.com/littleK0i/SnowDDL/actions/workflows/pytest.yml/badge.svg)](https://github.com/littleK0i/SnowDDL/actions/workflows/pytest.yml)
