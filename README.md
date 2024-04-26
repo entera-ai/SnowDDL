@@ -170,10 +170,10 @@ python -m venv snowddl-local-venv
 source snowddl-local-venv/bin/activate
 ```
 
-3. Install Editable Project from GitHub URL
+3. Install Editable Project from Local Clone Directory
 
 ```
-pip install --editable git+https://github.com/entera-ai/SnowDDL.git@master
+pip install --editable /path/to/cloned/fork/repo/directory
 ```
 
 Any changes made to the source code will automatically reflect in `snowddl` invocations invoked from
