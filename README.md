@@ -155,6 +155,31 @@ db clones. That is, db clone schemas should be configured with `schema_roles: Fa
 roles get generated on the cloned schemas. These roles are not necessary because grants are already inherited
 from source db schema roles
 
+## Local Development
+
+1. Clone repo
+
+```
+git clone git@github.com:entera-ai/SnowDDL.git
+```
+
+2. Create & Activate Virtual Env
+
+```
+python -m venv snowddl-local-venv
+source snowddl-local-venv/bin/activate
+```
+
+3. Install Editable Project from GitHub URL
+
+```
+pip install --editable git+https://github.com/entera-ai/SnowDDL.git@master
+```
+
+Any changes made to the source code will automatically reflect in `snowddl` invocations invoked from
+activated virtual env, because we used an `--editable` install. This is the best way to iteratively
+develop and troubleshoot changes to the source code.
+
 ## Mini-roadmap
 
 - ~~placeholders in YAML configs~~ (done)
