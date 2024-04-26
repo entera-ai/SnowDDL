@@ -92,6 +92,10 @@ class SchemaResolver(AbstractResolver):
             if schema_full_name in self.blueprints:
                 continue
 
+            # Parent object is going to be dropped
+            if self.engine.intention_cache.check_parent_drop_intention(self.object_type, schema_full_name):
+                continue
+
             database_full_name = ".".join(schema_full_name.split(".")[:1])
             database_bp = self.config.get_blueprints_by_type(DatabaseBlueprint).get(database_full_name)
 
