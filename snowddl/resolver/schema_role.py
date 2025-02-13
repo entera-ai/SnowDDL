@@ -154,6 +154,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
             ObjectType.FUNCTION,
             ObjectType.PROCEDURE,
             ObjectType.TABLE,
+            ObjectType.DYNAMIC_TABLE,
             ObjectType.VIEW,
         ]
         filtered_create_object_types = self.filter_default_schema_role_object_grants(
