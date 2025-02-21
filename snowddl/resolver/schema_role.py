@@ -23,23 +23,23 @@ class SchemaRoleResolver(AbstractRoleResolver):
             if schema_bp.schema_roles == False:
                 # don't generate any roles for this schema
                 continue
-            elif schema_bp.schema_roles == []:
-                # if schema_roles attribute is not specified, create all roles by default
-                if schema_bp.permission_model.ruleset.create_schema_owner_role:
-                    blueprints.append(self.get_blueprint_owner_role(schema_bp))
-                if schema_bp.permission_model.ruleset.create_schema_write_role:
-                    blueprints.append(self.get_blueprint_write_role(schema_bp))
-                if schema_bp.permission_model.ruleset.create_schema_read_role:
-                    blueprints.append(self.get_blueprint_read_role(schema_bp))
-            else:
-                # otherwise, create only specific roles
-                for schema_role in schema_bp.schema_roles:
-                    if schema_role.lower() == "owner":
-                        blueprints.append(self.get_blueprint_owner_role(schema_bp))
-                    if schema_role.lower() == "read":
-                        blueprints.append(self.get_blueprint_read_role(schema_bp))
-                    if schema_role.lower() == "write":
-                        blueprints.append(self.get_blueprint_write_role(schema_bp))
+
+            schema_bp.schema_roles = [role.lower() for role in schema_bp.schema_roles]
+            # generate some or all schema roles using permission model
+            # if schema_roles[list[str]] is non-empty, generate just those roles
+            # if schema roles is an empty list, generate all roles
+            if schema_bp.permission_model.ruleset.create_schema_owner_role and (
+                "owner" in schema_bp.schema_roles or schema_bp.schema_roles == []
+            ):
+                blueprints.append(self.get_blueprint_owner_role(schema_bp))
+            if schema_bp.permission_model.ruleset.create_schema_write_role and (
+                "write" in schema_bp.schema_roles or schema_bp.schema_roles == []
+            ):
+                blueprints.append(self.get_blueprint_write_role(schema_bp))
+            if schema_bp.permission_model.ruleset.create_schema_read_role and (
+                "read" in schema_bp.schema_roles or schema_bp.schema_roles == []
+            ):
+                blueprints.append(self.get_blueprint_read_role(schema_bp))
 
         return {str(bp.full_name): bp for bp in blueprints}
 
