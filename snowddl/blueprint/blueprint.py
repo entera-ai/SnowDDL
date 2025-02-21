@@ -70,6 +70,7 @@ class DatabaseBlueprint(AbstractBlueprint):
     is_sandbox: Optional[bool] = None
     owner_additional_grants: List[Grant] = []
     owner_additional_account_grants: List[AccountGrant] = []
+    copy_schema_role_grants_to_db_clones: List[str] = []
 
 
 class DatabaseRoleBlueprint(RoleBlueprint, DependsOnMixin):
