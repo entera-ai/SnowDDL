@@ -50,7 +50,70 @@ database_json_schema = {
             "items": {
                 "type": "string"
             }
-        }
+        },
+        "schema_roles": {
+            "anyOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "owner": {
+                            "type": "object",
+                            "properties": {
+                                "create": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "ownership": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                },
+                                "privileges": {
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "enum": ["DYNAMIC TABLES", "STAGES"]
+                                    },
+                                }
+                            }
+                        },
+                        "read": {
+                            "type": "object",
+                            "properties": {
+                                "privileges": {
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "enum": ["DYNAMIC TABLES", "EXTERNAL TABLES", "FILE FORMATS", "FUNCTIONS", "MATERIALIZED VIEWS", "PROCEDURES", "STAGES", "STREAMS", "TABLES", "VIEWS"]
+                                    },
+                                }
+                            }
+                        },
+                        "write": {
+                            "type": "object",
+                            "properties": {
+                                "privileges": {
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "enum": ["STAGES", "SEQUENCES", "TABLES"]
+                                    },
+                                }
+                            }
+                        },
+                    }
+                },
+                {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                {
+                    "type": "boolean"
+                }
+            ],
+        },
     },
     "additionalProperties": False
 }
@@ -106,6 +169,7 @@ class DatabaseParser(AbstractParser):
                 owner_additional_account_grants=owner_additional_account_grants,
                 comment=database_params.get("comment", None),
                 copy_schema_role_grants_to_db_clones=database_params.get("copy_schema_role_grants_to_db_clones", []),
+                schema_roles=database_params.get("schema_roles", []),
             )
 
             self.config.add_blueprint(bp)
