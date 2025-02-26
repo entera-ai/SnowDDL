@@ -90,6 +90,8 @@ class DatabaseBlueprint(AbstractBlueprint):
     is_sandbox: Optional[bool] = None
     owner_additional_grants: List[Grant] = []
     owner_additional_account_grants: List[AccountGrant] = []
+    copy_schema_role_grants_to_db_clones: List[str] = []
+    schema_roles: Union[dict, List[str], bool] = []
 
 
 class DatabaseRoleBlueprint(RoleBlueprint, DependsOnMixin):
@@ -292,6 +294,7 @@ class SchemaBlueprint(AbstractBlueprint):
     is_sandbox: Optional[bool] = None
     owner_additional_grants: List[Grant] = []
     owner_additional_account_grants: List[AccountGrant] = []
+    schema_roles: Union[List[str], bool] = []
 
 
 class SchemaRoleBlueprint(RoleBlueprint, DependsOnMixin):
