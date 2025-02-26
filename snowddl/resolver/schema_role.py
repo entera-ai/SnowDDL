@@ -1,8 +1,11 @@
+from typing import List, Dict, Union
+
 from snowddl.blueprint import (
     DatabaseIdent,
     DatabaseBlueprint,
     SchemaIdent,
     SchemaRoleBlueprint,
+    SchemaIdent,
     SchemaBlueprint,
     SchemaObjectIdent,
     Grant,
@@ -52,6 +55,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
         then all default grants applied to it's schema roles also get duplexed to the specified
         clones. For instance, if the ANALYTICS__<schema>__OWNER__S_ROLE has USAGE on ANALYTICS,
         then it also gets USAGE on ANALYTICS_CLONE1 and ANALYTICS_CLONE2.
+
         This method is a helper to gather the list of database identifiers to which schema role
         grants should be applied in the get_blueprint_*_role() methods. This list will be a union
         of the database identifier specified by the schema_bp argument, and the database identifiers
@@ -88,7 +92,9 @@ class SchemaRoleResolver(AbstractRoleResolver):
                     name=database_identifier,
                 )
             )
+
             schema_identifier = SchemaIdent(schema_bp.full_name.env_prefix, database_identifier, schema_bp.full_name.schema)
+
             grants.append(
                 Grant(
                     privilege="USAGE",
@@ -96,6 +102,7 @@ class SchemaRoleResolver(AbstractRoleResolver):
                     name=schema_identifier,
                 )
             )
+
             for model_create_grant in schema_bp.permission_model.owner_create_grants:
                 grants.append(
                     Grant(
