@@ -47,9 +47,9 @@ class DatabaseResolver(AbstractResolver):
     def compare_object(self, bp: DatabaseBlueprint, row: dict):
         if bp.is_transient != row["is_transient"]:
             if bp.is_transient:
-                raise SnowDDLUnsupportedError("Cannot change PERMANENT object into TRANSIENT object")
+                raise SnowDDLUnsupportedError(f"Cannot change PERMANENT database [{bp.full_name}] into TRANSIENT database")
             else:
-                raise SnowDDLUnsupportedError("Cannot change TRANSIENT object into PERMANENT object")
+                raise SnowDDLUnsupportedError(f"Cannot change TRANSIENT database [{bp.full_name}] into PERMANENT database")
 
         query = self.engine.query_builder()
 
