@@ -4,11 +4,11 @@ from .blueprint import (
     DependsOnMixin,
     RoleBlueprint,
     AccountParameterBlueprint,
+    AggregationPolicyBlueprint,
     AlertBlueprint,
     BusinessRoleBlueprint,
     DatabaseBlueprint,
     DatabaseRoleBlueprint,
-    DatabaseShareBlueprint,
     DynamicTableBlueprint,
     EventTableBlueprint,
     ExternalAccessIntegrationBlueprint,
@@ -26,14 +26,16 @@ from .blueprint import (
     PipeBlueprint,
     PrimaryKeyBlueprint,
     ProcedureBlueprint,
+    ProjectionPolicyBlueprint,
     ResourceMonitorBlueprint,
     RowAccessPolicyBlueprint,
     SchemaBlueprint,
     SchemaRoleBlueprint,
     SecretBlueprint,
+    SequenceBlueprint,
+    ShareRoleBlueprint,
     StageBlueprint,
     StageFileBlueprint,
-    SequenceBlueprint,
     StreamBlueprint,
     TableBlueprint,
     TagBlueprint,
@@ -46,7 +48,15 @@ from .blueprint import (
     T_Blueprint,
 )
 
-from .column import ExternalTableColumn, TableColumn, ViewColumn, ArgumentWithType, NameWithType, SearchOptimizationItem
+from .column import (
+    DynamicTableColumn,
+    ExternalTableColumn,
+    TableColumn,
+    ViewColumn,
+    ArgumentWithType,
+    NameWithType,
+    SearchOptimizationItem,
+)
 from .data_type import BaseDataType, DataType
 from .edition import Edition
 from .grant import Grant, AccountGrant, FutureGrant
@@ -58,7 +68,7 @@ from .ident import (
     AccountIdent,
     AccountObjectIdent,
     DatabaseIdent,
-    InboundShareIdent,
+    DatabaseRoleIdent,
     OutboundShareIdent,
     SchemaIdent,
     SchemaObjectIdent,
@@ -70,12 +80,22 @@ from .ident import (
 from .ident_builder import (
     build_schema_object_ident,
     build_role_ident,
-    build_grant_name_ident_snowflake,
-    build_future_grant_name_ident_snowflake,
+    build_grant_name_ident,
+    build_future_grant_name_ident,
     build_default_namespace_ident,
 )
 
 from .object_type import ObjectType
 from .permission_model import PermissionModel, PermissionModelCreateGrant, PermissionModelFutureGrant, PermissionModelRuleset
-from .reference import ForeignKeyReference, IndexReference, MaskingPolicyReference, RowAccessPolicyReference, TagReference
+from .reference import (
+    AbstractPolicyReference,
+    AggregationPolicyReference,
+    ForeignKeyReference,
+    IndexReference,
+    MaskingPolicyReference,
+    NetworkPolicyReference,
+    ProjectionPolicyReference,
+    RowAccessPolicyReference,
+    TagReference,
+)
 from .stage import StageWithPath, StageUploadFile

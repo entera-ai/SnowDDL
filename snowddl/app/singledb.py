@@ -14,13 +14,14 @@ from snowddl.blueprint import (
     SchemaObjectBlueprint,
 )
 from snowddl.config import SnowDDLConfig
-from snowddl.parser import singledb_parser_sequence
-from snowddl.resolver import singledb_resolver_sequence
+from snowddl.parser import singledb_parse_sequence
+from snowddl.resolver import singledb_resolve_sequence, singledb_destroy_sequence
 
 
 class SingleDbApp(BaseApp):
-    parser_sequence = singledb_parser_sequence
-    resolver_sequence = singledb_resolver_sequence
+    parse_sequence = singledb_parse_sequence
+    resolve_sequence = singledb_resolve_sequence
+    destroy_sequence = singledb_destroy_sequence
 
     def __init__(self):
         self.config_db: Optional[DatabaseIdent] = None
@@ -30,6 +31,7 @@ class SingleDbApp(BaseApp):
 
     def init_arguments_parser(self):
         formatter = lambda prog: HelpFormatter(prog, max_help_position=32)
+
         parser = ArgumentParser(
             prog="snowddl-singledb",
             description="Special SnowDDL mode to process schema objects of single database only",
@@ -119,6 +121,7 @@ class SingleDbApp(BaseApp):
             "--log-level", help="Log level (possible values: DEBUG, INFO, WARNING; default: INFO)", default="INFO"
         )
         parser.add_argument("--show-sql", help="Show executed DDL queries", default=False, action="store_true")
+        parser.add_argument("--show-timers", help="Show debug timers", default=False, action="store_true")
 
         # Placeholders
         parser.add_argument(
@@ -153,7 +156,22 @@ class SingleDbApp(BaseApp):
             action="store_true",
         )
         parser.add_argument(
+            "--apply-all-policy", help="Additionally apply changes to all types of POLICIES", default=False, action="store_true"
+        )
+        parser.add_argument(
+            "--apply-aggregation-policy",
+            help="Additionally apply changes to AGGREGATION POLICIES",
+            default=False,
+            action="store_true",
+        )
+        parser.add_argument(
             "--apply-masking-policy", help="Additionally apply changes to MASKING POLICIES", default=False, action="store_true"
+        )
+        parser.add_argument(
+            "--apply-projection-policy",
+            help="Additionally apply changes to PROJECTION POLICIES",
+            default=False,
+            action="store_true",
         )
         parser.add_argument(
             "--apply-row-access-policy",
@@ -232,10 +250,12 @@ class SingleDbApp(BaseApp):
         return singledb_config
 
     def convert_blueprint(self, bp: AbstractBlueprint):
-        for field_name, field_value in bp:
-            self.convert_object_recursive(getattr(bp, field_name))
+        converted_bp = bp.model_copy(deep=True)
 
-        return bp
+        for field_name, field_value in converted_bp:
+            self.convert_object_recursive(getattr(converted_bp, field_name))
+
+        return converted_bp
 
     def convert_object_recursive(self, obj):
         if isinstance(obj, BaseModel):
@@ -269,21 +289,27 @@ class SingleDbApp(BaseApp):
             self.output_engine_context()
 
             if self.args.get("action") == "destroy":
-                for resolver_cls in self.resolver_sequence:
-                    resolver = resolver_cls(self.engine)
-                    resolver.destroy()
+                for resolver_cls in self.destroy_sequence:
+                    with self.measure_elapsed_time(resolver_cls.__name__):
+                        resolver = resolver_cls(self.engine)
+                        resolver.destroy()
 
                     error_count += len(resolver.errors)
 
             else:
-                for resolver_cls in self.resolver_sequence:
-                    resolver = resolver_cls(self.engine)
-                    resolver.resolve()
+                for resolver_cls in self.resolve_sequence:
+                    with self.measure_elapsed_time(resolver_cls.__name__):
+                        resolver = resolver_cls(self.engine)
+                        resolver.resolve()
 
                     error_count += len(resolver.errors)
 
             self.engine.connection.close()
             self.output_engine_stats()
+            self.output_engine_warnings()
+
+            if self.args.get("show_timers"):
+                self.output_app_timers()
 
             if self.args.get("show_sql"):
                 self.output_executed_ddl()

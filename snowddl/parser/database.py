@@ -1,4 +1,4 @@
-from snowddl.blueprint import DatabaseBlueprint, DatabaseIdent, Grant, AccountGrant, ObjectType, Ident, build_role_ident
+from snowddl.blueprint import DatabaseBlueprint, DatabaseIdent
 from snowddl.parser.abc_parser import AbstractParser
 
 
@@ -17,6 +17,14 @@ database_json_schema = {
         },
         "is_sandbox": {
             "type": "boolean"
+        },
+        "owner_share_read": {
+            "share_read": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            },
         },
         "owner_integration_usage": {
             "type": "array",
@@ -80,12 +88,13 @@ class DatabaseParser(AbstractParser):
             if database_path.name.startswith("__"):
                 continue
 
+            database_name = database_path.name.upper()
             database_params = self.parse_single_file(database_path / "params.yaml", database_json_schema)
 
-            database_name = database_path.name.upper()
-            database_permission_model = self.config.get_permission_model(
-                database_params.get("permission_model", self.config.DEFAULT_PERMISSION_MODEL).upper()
-            )
+            # fmt: off
+            databases_permission_model_name = database_params.get("permission_model", self.config.DEFAULT_PERMISSION_MODEL).upper()
+            database_permission_model = self.config.get_permission_model(databases_permission_model_name)
+            # fmt: on
 
             if not database_permission_model.ruleset.create_database_owner_role:
                 for k in database_params:
@@ -96,6 +105,10 @@ class DatabaseParser(AbstractParser):
 
             owner_additional_grants = []
             owner_additional_account_grants = []
+
+            for share_name in database_params.get("owner_share_read", []):
+                owner_additional_grants.append(self.build_share_role_grant(share_name))
+                self.config.add_blueprint(self.build_share_role_blueprint(share_name))
 
             for integration_name in database_params.get("owner_integration_usage", []):
                 owner_additional_grants.append(self.build_integration_usage_grant(integration_name))
@@ -111,7 +124,7 @@ class DatabaseParser(AbstractParser):
 
             bp = DatabaseBlueprint(
                 full_name=DatabaseIdent(self.env_prefix, database_name),
-                permission_model=database_permission_model,
+                permission_model=databases_permission_model_name,
                 is_transient=database_params.get("is_transient", False),
                 retention_time=database_params.get("retention_time", None),
                 is_sandbox=database_params.get("is_sandbox", False),
@@ -123,27 +136,3 @@ class DatabaseParser(AbstractParser):
             )
 
             self.config.add_blueprint(bp)
-
-    def build_warehouse_role_grant(self, warehouse_name, role_type):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.ROLE,
-            name=build_role_ident(self.env_prefix, warehouse_name, role_type, self.config.WAREHOUSE_ROLE_SUFFIX),
-        )
-
-    def build_integration_usage_grant(self, integration_name):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.INTEGRATION,
-            name=Ident(integration_name),
-        )
-
-    def build_global_role_grant(self, global_role_name):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.ROLE,
-            name=Ident(global_role_name),
-        )
-
-    def build_account_grant(self, privilege):
-        return AccountGrant(privilege=privilege.upper())

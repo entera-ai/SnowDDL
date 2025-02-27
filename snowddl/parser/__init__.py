@@ -1,5 +1,7 @@
 from ._parsed_file import ParsedFile
 from .account_params import AccountParameterParser
+from .account_policy import AccountPolicyParser
+from .aggregation_policy import AggregationPolicyParser
 from .alert import AlertParser
 from .business_role import BusinessRoleParser
 from .database import DatabaseParser
@@ -11,16 +13,16 @@ from .external_table import ExternalTableParser
 from .file_format import FileFormatParser
 from .function import FunctionParser
 from .hybrid_table import HybridTableParser
-from .inbound_share import InboundShareParser
 from .materialized_view import MaterializedViewParser
 from .masking_policy import MaskingPolicyParser
 from .network_policy import NetworkPolicyParser
 from .network_rule import NetworkRuleParser
 from .outbound_share import OutboundShareParser
-from .permission_model import PermissionModelParser, default_permission_models
+from .permission_model import PermissionModelParser
 from .pipe import PipeParser
 from .placeholder import PlaceholderParser
 from .procedure import ProcedureParser
+from .projection_policy import ProjectionPolicyParser
 from .resource_monitor import ResourceMonitorParser
 from .row_access_policy import RowAccessPolicyParser
 from .schema import SchemaParser
@@ -36,17 +38,23 @@ from .view import ViewParser
 from .warehouse import WarehouseParser
 
 
-default_parser_sequence = [
+default_parse_sequence = [
     AccountParameterParser,
+    # --
+    AggregationPolicyParser,
+    MaskingPolicyParser,
     NetworkPolicyParser,
+    ProjectionPolicyParser,
+    RowAccessPolicyParser,
     ResourceMonitorParser,
+    AccountPolicyParser,
+    # --
     WarehouseParser,
     DatabaseParser,
     SchemaParser,
     SecretParser,
     NetworkRuleParser,
     ExternalAccessIntegrationParser,
-    # InboundShareParser,
     FileFormatParser,
     StageParser,
     SequenceParser,
@@ -63,17 +71,21 @@ default_parser_sequence = [
     ViewParser,
     PipeParser,
     TaskParser,
-    MaskingPolicyParser,
-    RowAccessPolicyParser,
+    AlertParser,
+    # --
     OutboundShareParser,
     TechnicalRoleParser,
     BusinessRoleParser,
     UserParser,
-    AlertParser,
 ]
 
 
-singledb_parser_sequence = [
+singledb_parse_sequence = [
+    AggregationPolicyParser,
+    MaskingPolicyParser,
+    ProjectionPolicyParser,
+    RowAccessPolicyParser,
+    # --
     DatabaseParser,
     SchemaParser,
     SecretParser,
@@ -94,7 +106,5 @@ singledb_parser_sequence = [
     ViewParser,
     PipeParser,
     TaskParser,
-    MaskingPolicyParser,
-    RowAccessPolicyParser,
     AlertParser,
 ]

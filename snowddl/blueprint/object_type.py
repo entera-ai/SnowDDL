@@ -15,6 +15,12 @@ class ObjectType(Enum):
         "blueprint_cls": "AccountParameterBlueprint",
     }
 
+    AGGREGATION_POLICY = {
+        "singular": "AGGREGATION POLICY",
+        "plural": "AGGREGATION POLICIES",
+        "blueprint_cls": "AggregationPolicyBlueprint",
+    }
+
     ALERT = {
         "singular": "ALERT",
         "plural": "ALERTS",
@@ -34,10 +40,17 @@ class ObjectType(Enum):
         "blueprint_cls": "DatabaseBlueprint",
     }
 
+    # Technical object type, used for GRANTs only
+    # There is no blueprint
+    DATABASE_ROLE = {
+        "singular": "DATABASE ROLE",
+        "plural": "DATABASE ROLES",
+    }
+
     DYNAMIC_TABLE = {
         "singular": "DYNAMIC TABLE",
         "plural": "DYNAMIC TABLES",
-        "simplified": "TABLE",
+        "singular_for_ref": "TABLE",
         "is_future_grant_supported": True,
         "blueprint_cls": "DynamicTableBlueprint",
     }
@@ -45,7 +58,7 @@ class ObjectType(Enum):
     EVENT_TABLE = {
         "singular": "EVENT TABLE",
         "plural": "EVENT TABLES",
-        "simplified": "TABLE",
+        "singular_for_ref": "TABLE",
         "is_future_grant_supported": True,
         "blueprint_cls": "EventTableBlueprint",
     }
@@ -53,7 +66,8 @@ class ObjectType(Enum):
     EXTERNAL_ACCESS_INTEGRATION = {
         "singular": "EXTERNAL ACCESS INTEGRATION",
         "plural": "EXTERNAL ACCESS INTEGRATIONS",
-        "simplified": "INTEGRATION",
+        "singular_for_ref": "INTEGRATION",
+        "singular_for_grant": "INTEGRATION",
         "blueprint_cls": "ExternalAccessIntegrationBlueprint",
     }
 
@@ -67,7 +81,7 @@ class ObjectType(Enum):
     EXTERNAL_TABLE = {
         "singular": "EXTERNAL TABLE",
         "plural": "EXTERNAL TABLES",
-        "simplified": "TABLE",
+        "singular_for_ref": "TABLE",
         "is_future_grant_supported": True,
         "blueprint_cls": "ExternalTableBlueprint",
     }
@@ -83,13 +97,14 @@ class ObjectType(Enum):
         "singular": "FUNCTION",
         "plural": "FUNCTIONS",
         "is_future_grant_supported": True,
+        "is_overloading_supported": True,
         "blueprint_cls": "FunctionBlueprint",
     }
 
     HYBRID_TABLE = {
         "singular": "HYBRID TABLE",
         "plural": "HYBRID TABLES",
-        "simplified": "TABLE",
+        "singular_for_ref": "TABLE",
         "is_future_grant_supported": True,
         "blueprint_cls": "HybridTableBlueprint",
     }
@@ -110,7 +125,7 @@ class ObjectType(Enum):
     MATERIALIZED_VIEW = {
         "singular": "MATERIALIZED VIEW",
         "plural": "MATERIALIZED VIEWS",
-        "simplified": "VIEW",
+        "singular_for_ref": "VIEW",
         "is_future_grant_supported": True,
         "blueprint_cls": "MaterializedViewBlueprint",
     }
@@ -128,6 +143,11 @@ class ObjectType(Enum):
         "blueprint_cls": "NetworkRuleBlueprint",
     }
 
+    NOTEBOOK = {
+        "singular": "NOTEBOOK",
+        "plural": "NOTEBOOKS",
+    }
+
     PIPE = {
         "singular": "PIPE",
         "plural": "PIPES",
@@ -139,7 +159,14 @@ class ObjectType(Enum):
         "singular": "PROCEDURE",
         "plural": "PROCEDURES",
         "is_future_grant_supported": True,
+        "is_overloading_supported": True,
         "blueprint_cls": "ProcedureBlueprint",
+    }
+
+    PROJECTION_POLICY = {
+        "singular": "PROJECTION POLICY",
+        "plural": "PROJECTION POLICIES",
+        "blueprint_cls": "ProjectionPolicyBlueprint",
     }
 
     RESOURCE_MONITOR = {
@@ -275,8 +302,12 @@ class ObjectType(Enum):
         return self.value.get("plural")
 
     @property
-    def simplified(self):
-        return self.value.get("simplified", self.value.get("singular"))
+    def singular_for_grant(self):
+        return self.value.get("singular_for_grant", self.value.get("singular"))
+
+    @property
+    def singular_for_ref(self):
+        return self.value.get("singular_for_ref", self.value.get("singular"))
 
     @property
     def blueprint_cls(self):
@@ -288,6 +319,10 @@ class ObjectType(Enum):
     @property
     def is_future_grant_supported(self) -> bool:
         return self.value.get("is_future_grant_supported", False)
+
+    @property
+    def is_overloading_supported(self) -> bool:
+        return self.value.get("is_overloading_supported", False)
 
     def __repr__(self):
         return f"<{self.__class__.__name__}.{super().name}>"

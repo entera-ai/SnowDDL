@@ -2,16 +2,26 @@ from collections import defaultdict
 from fnmatch import translate
 from pathlib import Path
 from re import compile
-from typing import Dict, List, Type, Union
+from typing import Dict, List, Type, Optional, Union
 
-from snowddl.blueprint import AbstractBlueprint, AbstractIdentWithPrefix, PermissionModel, T_Blueprint
+from snowddl.blueprint import (
+    AbstractBlueprint,
+    AbstractIdentWithPrefix,
+    AbstractPolicyReference,
+    ObjectType,
+    PermissionModel,
+    PermissionModelRuleset,
+    PermissionModelCreateGrant,
+    PermissionModelFutureGrant,
+    T_Blueprint,
+)
 
 
 class SnowDDLConfig:
     BUSINESS_ROLE_SUFFIX = "B_ROLE"
     DATABASE_ROLE_SUFFIX = "D_ROLE"
-    INBOUND_SHARE_ROLE_SUFFIX = "IS_ROLE"
     SCHEMA_ROLE_SUFFIX = "S_ROLE"
+    SHARE_ROLE_SUFFIX = "SH_ROLE"
     TECHNICAL_ROLE_SUFFIX = "T_ROLE"
     USER_ROLE_SUFFIX = "U_ROLE"
     WAREHOUSE_ROLE_SUFFIX = "W_ROLE"
@@ -31,30 +41,50 @@ class SnowDDLConfig:
         self.errors: List[dict] = []
 
         self.placeholders: Dict[str, Union[bool, float, int, str]] = {}
-        self.permission_models: Dict[str, PermissionModel] = {}
+        self.permission_models: Dict[str, PermissionModel] = self._init_permission_models()
 
     def get_blueprints_by_type(self, cls: Type[T_Blueprint]) -> Dict[str, T_Blueprint]:
         return self.blueprints.get(cls, {})
 
     def get_blueprints_by_type_and_pattern(self, cls: Type[T_Blueprint], pattern: str) -> Dict[str, T_Blueprint]:
         pattern = pattern.upper()
-        type_blueprints = self.blueprints.get(cls, {})
+        all_blueprints = self.blueprints.get(cls, {})
 
-        # Add env prefix to pattern IF blueprint supports it
-        if "full_name" in cls.model_fields and issubclass(cls.model_fields["full_name"].annotation, AbstractIdentWithPrefix):
-            pattern = f"{self.env_prefix}{pattern}"
+        # Simple search by blueprint name for patterns without any special chars
+        if not any(special_char in pattern for special_char in ["|", "!", "*", "?", "[", "]"]):
+            # Add env prefix to pattern IF blueprint type supports it
+            if "full_name" in cls.model_fields and issubclass(cls.model_fields["full_name"].annotation, AbstractIdentWithPrefix):
+                pattern = f"{self.env_prefix}{pattern}"
 
-        # Use Unix-style wildcards if any special characters detected in pattern
-        if any(special_char in pattern for special_char in ["*", "?", "[", "]"]):
-            regexp = compile(translate(pattern))
+            return {pattern: all_blueprints[pattern]} if pattern in all_blueprints else {}
 
-            return {full_name: bp for full_name, bp in type_blueprints.items() if regexp.match(full_name)}
+        include_full_names = set()
+        exclude_full_names = set()
 
-        # Use basic key matching otherwise
-        if pattern in type_blueprints:
-            return {pattern: type_blueprints[pattern]}
+        for sub_pattern in pattern.split("|"):
+            is_exclude = False
 
-        return {}
+            # Exclude sub-pattern
+            if sub_pattern.startswith("!"):
+                is_exclude = True
+                sub_pattern = sub_pattern[1:]
+
+            # Add env prefix to sub-pattern IF blueprint type supports it
+            if "full_name" in cls.model_fields and issubclass(cls.model_fields["full_name"].annotation, AbstractIdentWithPrefix):
+                sub_pattern = f"{self.env_prefix}{sub_pattern}"
+
+            regexp = compile(translate(sub_pattern))
+
+            if is_exclude:
+                exclude_full_names.update(full_name for full_name in all_blueprints if regexp.match(full_name))
+            else:
+                include_full_names.update(full_name for full_name in all_blueprints if regexp.match(full_name))
+
+        return {
+            full_name: bp
+            for full_name, bp in all_blueprints.items()
+            if full_name in include_full_names and full_name not in exclude_full_names
+        }
 
     def get_placeholder(self, name: str) -> Union[bool, float, int, str]:
         if name not in self.placeholders:
@@ -62,8 +92,10 @@ class SnowDDLConfig:
 
         return self.placeholders[name]
 
-    def get_permission_model(self, name: str) -> PermissionModel:
-        if name not in self.permission_models:
+    def get_permission_model(self, name: Optional[str]) -> PermissionModel:
+        if name is None:
+            name = self.DEFAULT_PERMISSION_MODEL
+        elif name not in self.permission_models:
             raise ValueError(f"Unknown permission model [{name}]")
 
         return self.permission_models[name]
@@ -74,6 +106,17 @@ class SnowDDLConfig:
     def remove_blueprint(self, bp: AbstractBlueprint):
         if str(bp.full_name) not in self.blueprints.get(bp.__class__, {}):
             raise ValueError(f"Blueprint with type [{bp.__class__.__name__}] and name [{bp.full_name}] does not exist in config")
+
+        del self.blueprints[bp.__class__][str(bp.full_name)]
+
+    def add_policy_reference(self, cls: Type[T_Blueprint], policy_name: AbstractIdentWithPrefix, ref: AbstractPolicyReference):
+        if "references" not in cls.model_fields:
+            raise ValueError(f"{cls.__name__} does not have field [references], probably not a policy")
+
+        if str(policy_name) not in self.blueprints[cls]:
+            raise ValueError(f"{cls.__name__} with name [{policy_name}] does not exist or was not defined yet")
+
+        self.blueprints[cls][str(policy_name)].references.append(ref)
 
     def add_error(self, path: Path, e: Exception):
         self.errors.append(
@@ -102,3 +145,61 @@ class SnowDDLConfig:
             return f"{env_prefix}__"
 
         return ""
+
+    def _init_permission_models(self):
+        return {
+            self.DEFAULT_PERMISSION_MODEL: PermissionModel(
+                ruleset=PermissionModelRuleset.SCHEMA_OWNER,
+                owner_create_grants=[
+                    PermissionModelCreateGrant(on=ObjectType.FILE_FORMAT),
+                    PermissionModelCreateGrant(on=ObjectType.FUNCTION),
+                    PermissionModelCreateGrant(on=ObjectType.PROCEDURE),
+                    PermissionModelCreateGrant(on=ObjectType.TABLE),
+                    PermissionModelCreateGrant(on=ObjectType.VIEW),
+                ],
+                owner_future_grants=[
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.ALERT),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.DYNAMIC_TABLE),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.EVENT_TABLE),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.EXTERNAL_TABLE),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.FILE_FORMAT),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.FUNCTION),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.MATERIALIZED_VIEW),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.PIPE),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.PROCEDURE),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.SEQUENCE),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.STAGE),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.STREAM),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.TABLE),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.TASK),
+                    PermissionModelFutureGrant(privilege="OWNERSHIP", on=ObjectType.VIEW),
+                ],
+                write_future_grants=[
+                    PermissionModelFutureGrant(privilege="READ", on=ObjectType.STAGE),
+                    PermissionModelFutureGrant(privilege="WRITE", on=ObjectType.STAGE),
+                    PermissionModelFutureGrant(privilege="USAGE", on=ObjectType.STAGE),
+                    PermissionModelFutureGrant(privilege="USAGE", on=ObjectType.SEQUENCE),
+                    PermissionModelFutureGrant(privilege="INSERT", on=ObjectType.TABLE),
+                    PermissionModelFutureGrant(privilege="UPDATE", on=ObjectType.TABLE),
+                    PermissionModelFutureGrant(privilege="DELETE", on=ObjectType.TABLE),
+                    PermissionModelFutureGrant(privilege="TRUNCATE", on=ObjectType.TABLE),
+                ],
+                read_future_grants=[
+                    PermissionModelFutureGrant(privilege="SELECT", on=ObjectType.DYNAMIC_TABLE),
+                    PermissionModelFutureGrant(privilege="SELECT", on=ObjectType.EXTERNAL_TABLE),
+                    PermissionModelFutureGrant(privilege="REFERENCES", on=ObjectType.EXTERNAL_TABLE),
+                    PermissionModelFutureGrant(privilege="USAGE", on=ObjectType.FILE_FORMAT),
+                    PermissionModelFutureGrant(privilege="USAGE", on=ObjectType.FUNCTION),
+                    PermissionModelFutureGrant(privilege="SELECT", on=ObjectType.MATERIALIZED_VIEW),
+                    PermissionModelFutureGrant(privilege="REFERENCES", on=ObjectType.MATERIALIZED_VIEW),
+                    PermissionModelFutureGrant(privilege="USAGE", on=ObjectType.PROCEDURE),
+                    PermissionModelFutureGrant(privilege="READ", on=ObjectType.STAGE),
+                    PermissionModelFutureGrant(privilege="USAGE", on=ObjectType.STAGE),
+                    PermissionModelFutureGrant(privilege="SELECT", on=ObjectType.STREAM),
+                    PermissionModelFutureGrant(privilege="SELECT", on=ObjectType.TABLE),
+                    PermissionModelFutureGrant(privilege="REFERENCES", on=ObjectType.TABLE),
+                    PermissionModelFutureGrant(privilege="SELECT", on=ObjectType.VIEW),
+                    PermissionModelFutureGrant(privilege="REFERENCES", on=ObjectType.VIEW),
+                ],
+            )
+        }

@@ -1,4 +1,4 @@
-from snowddl.blueprint import SchemaBlueprint, SchemaIdent, Grant, AccountGrant, ObjectType, Ident, build_role_ident
+from snowddl.blueprint import SchemaBlueprint, SchemaIdent, Grant, ObjectType, build_role_ident
 from snowddl.parser.abc_parser import AbstractParser
 from snowddl.parser.database import database_json_schema
 
@@ -43,6 +43,14 @@ schema_json_schema = {
             "items": {
                 "type": "string"
             }
+        },
+        "owner_share_read": {
+            "share_read": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                }
+            },
         },
         "owner_integration_usage": {
             "type": "array",
@@ -105,11 +113,13 @@ class SchemaParser(AbstractParser):
                 database_name = database_path.name.upper()
                 schema_name = schema_path.name.upper()
 
-                database_permission_model_name = database_params.get("permission_model", self.config.DEFAULT_PERMISSION_MODEL)
-                schema_permission_model_name = schema_params.get("permission_model", database_permission_model_name)
+                # fmt: off
+                database_permission_model_name = database_params.get("permission_model", self.config.DEFAULT_PERMISSION_MODEL).upper()
+                schema_permission_model_name = schema_params.get("permission_model", database_permission_model_name).upper()
+                # fmt: on
 
-                database_permission_model = self.config.get_permission_model(database_permission_model_name.upper())
-                schema_permission_model = self.config.get_permission_model(schema_permission_model_name.upper())
+                database_permission_model = self.config.get_permission_model(database_permission_model_name)
+                schema_permission_model = self.config.get_permission_model(schema_permission_model_name)
 
                 if database_permission_model.ruleset != schema_permission_model.ruleset:
                     raise ValueError(
@@ -132,6 +142,10 @@ class SchemaParser(AbstractParser):
                 for full_schema_name in schema_params.get("owner_schema_write", []):
                     owner_additional_grants.append(self.build_schema_role_grant(full_schema_name, self.config.WRITE_ROLE_TYPE))
 
+                for share_name in schema_params.get("owner_share_read", []):
+                    owner_additional_grants.append(self.build_share_role_grant(share_name))
+                    self.config.add_blueprint(self.build_share_role_blueprint(share_name))
+
                 for integration_name in schema_params.get("owner_integration_usage", []):
                     owner_additional_grants.append(self.build_integration_usage_grant(integration_name))
 
@@ -146,7 +160,7 @@ class SchemaParser(AbstractParser):
 
                 bp = SchemaBlueprint(
                     full_name=SchemaIdent(self.env_prefix, database_name, schema_name),
-                    permission_model=schema_permission_model,
+                    permission_model=schema_permission_model_name,
                     is_transient=combined_params.get("is_transient", False),
                     retention_time=combined_params.get("retention_time", None),
                     is_sandbox=combined_params.get("is_sandbox", False),
@@ -166,27 +180,3 @@ class SchemaParser(AbstractParser):
             on=ObjectType.ROLE,
             name=build_role_ident(self.env_prefix, database, schema, role_type, self.config.SCHEMA_ROLE_SUFFIX),
         )
-
-    def build_warehouse_role_grant(self, warehouse_name, role_type):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.ROLE,
-            name=build_role_ident(self.env_prefix, warehouse_name, role_type, self.config.WAREHOUSE_ROLE_SUFFIX),
-        )
-
-    def build_integration_usage_grant(self, integration_name):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.INTEGRATION,
-            name=Ident(integration_name),
-        )
-
-    def build_global_role_grant(self, global_role_name):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.ROLE,
-            name=Ident(global_role_name),
-        )
-
-    def build_account_grant(self, privilege):
-        return AccountGrant(privilege=privilege.upper())

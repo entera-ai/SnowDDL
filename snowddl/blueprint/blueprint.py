@@ -1,7 +1,15 @@
 from abc import ABC
 from typing import Optional, List, Dict, Set, Union, TypeVar
 
-from .column import ExternalTableColumn, TableColumn, ViewColumn, ArgumentWithType, NameWithType, SearchOptimizationItem
+from .column import (
+    DynamicTableColumn,
+    ExternalTableColumn,
+    TableColumn,
+    ViewColumn,
+    ArgumentWithType,
+    NameWithType,
+    SearchOptimizationItem,
+)
 from .data_type import DataType
 from .grant import AccountGrant, Grant, FutureGrant
 from .ident import (
@@ -10,7 +18,6 @@ from .ident import (
     AccountObjectIdent,
     DatabaseIdent,
     AccountIdent,
-    InboundShareIdent,
     OutboundShareIdent,
     SchemaIdent,
     SchemaObjectIdent,
@@ -19,8 +26,16 @@ from .ident import (
     TableConstraintIdent,
 )
 from .object_type import ObjectType
-from .permission_model import PermissionModel
-from .reference import ForeignKeyReference, IndexReference, MaskingPolicyReference, RowAccessPolicyReference, TagReference
+from .reference import (
+    AggregationPolicyReference,
+    ForeignKeyReference,
+    IndexReference,
+    MaskingPolicyReference,
+    NetworkPolicyReference,
+    ProjectionPolicyReference,
+    RowAccessPolicyReference,
+    TagReference,
+)
 from .stage import StageWithPath
 from ..model import BaseModelWithConfig
 
@@ -50,6 +65,11 @@ class AccountParameterBlueprint(AbstractBlueprint):
     value: Union[bool, float, int, str]
 
 
+class AggregationPolicyBlueprint(SchemaObjectBlueprint):
+    body: str
+    references: List[AggregationPolicyReference] = []
+
+
 class AlertBlueprint(SchemaObjectBlueprint):
     full_name: SchemaObjectIdent
     warehouse: AccountObjectIdent
@@ -64,7 +84,7 @@ class BusinessRoleBlueprint(RoleBlueprint):
 
 class DatabaseBlueprint(AbstractBlueprint):
     full_name: DatabaseIdent
-    permission_model: PermissionModel
+    permission_model: Optional[str] = None
     is_transient: Optional[bool] = None
     retention_time: Optional[int] = None
     is_sandbox: Optional[bool] = None
@@ -78,15 +98,16 @@ class DatabaseRoleBlueprint(RoleBlueprint, DependsOnMixin):
     pass
 
 
-class DatabaseShareBlueprint(AbstractBlueprint):
-    full_name: DatabaseIdent
-    share_name: InboundShareIdent
-
-
 class DynamicTableBlueprint(SchemaObjectBlueprint, DependsOnMixin):
     text: str
+    columns: Optional[List[DynamicTableColumn]] = None
     target_lag: str
     warehouse: AccountObjectIdent
+    refresh_mode: Optional[str] = None
+    initialize: Optional[str] = None
+    cluster_by: Optional[List[str]] = None
+    is_transient: bool = False
+    retention_time: Optional[int] = None
 
 
 class EventTableBlueprint(SchemaObjectBlueprint):
@@ -94,6 +115,7 @@ class EventTableBlueprint(SchemaObjectBlueprint):
 
 
 class ExternalAccessIntegrationBlueprint(AbstractBlueprint):
+    full_name: AccountObjectIdent
     allowed_network_rules: List[SchemaObjectIdent]
     allowed_api_authentication_integrations: Optional[List[Ident]] = None
     allowed_authentication_secrets: Optional[List[SchemaObjectIdent]] = None
@@ -171,13 +193,6 @@ class HybridTableBlueprint(SchemaObjectBlueprint, DependsOnMixin):
     indexes: Optional[List[IndexReference]] = None
 
 
-class InboundShareBlueprint(AbstractBlueprint):
-    full_name: DatabaseIdent
-    accounts: List[AccountIdent] = []
-    share_restrictions: bool = False
-    grants: List[Grant] = []
-
-
 class MaterializedViewBlueprint(SchemaObjectBlueprint):
     text: str
     columns: Optional[List[ViewColumn]] = None
@@ -189,13 +204,17 @@ class MaskingPolicyBlueprint(SchemaObjectBlueprint):
     arguments: List[NameWithType]
     returns: DataType
     body: str
-    references: List[MaskingPolicyReference]
+    exempt_other_policies: bool = False
+    references: List[MaskingPolicyReference] = []
 
 
 class NetworkPolicyBlueprint(AbstractBlueprint):
     full_name: AccountObjectIdent
+    allowed_network_rule_list: List[SchemaObjectIdent] = []
+    blocked_network_rule_list: List[SchemaObjectIdent] = []
     allowed_ip_list: List[str] = []
     blocked_ip_list: List[str] = []
+    references: List[NetworkPolicyReference] = []
 
 
 class NetworkRuleBlueprint(SchemaObjectBlueprint):
@@ -219,6 +238,8 @@ class PipeBlueprint(SchemaObjectBlueprint):
     copy_pattern: Optional[str] = None
     copy_transform: Optional[Dict[str, str]] = None
     copy_file_format: Optional[SchemaObjectIdent] = None
+    copy_match_by_column_name: Optional[str] = None
+    copy_include_metadata: Optional[Dict[Ident, Ident]] = None
     copy_options: Optional[Dict[str, Union[bool, float, int, str, list]]] = None
     aws_sns_topic: Optional[str] = None
     integration: Optional[Ident] = None
@@ -247,6 +268,11 @@ class ProcedureBlueprint(SchemaObjectBlueprint):
     secrets: Optional[Dict[str, SchemaObjectIdent]] = None
 
 
+class ProjectionPolicyBlueprint(SchemaObjectBlueprint):
+    body: str
+    references: List[ProjectionPolicyReference] = []
+
+
 class ResourceMonitorBlueprint(AbstractBlueprint):
     full_name: AccountObjectIdent
     credit_quota: int
@@ -257,12 +283,12 @@ class ResourceMonitorBlueprint(AbstractBlueprint):
 class RowAccessPolicyBlueprint(SchemaObjectBlueprint):
     arguments: List[NameWithType]
     body: str
-    references: List[RowAccessPolicyReference]
+    references: List[RowAccessPolicyReference] = []
 
 
 class SchemaBlueprint(AbstractBlueprint):
     full_name: SchemaIdent
-    permission_model: PermissionModel
+    permission_model: Optional[str] = None
     is_transient: Optional[bool] = None
     retention_time: Optional[int] = None
     is_sandbox: Optional[bool] = None
@@ -286,6 +312,16 @@ class SecretBlueprint(SchemaObjectBlueprint):
     secret_string: Optional[str] = None
 
 
+class SequenceBlueprint(SchemaObjectBlueprint):
+    start: int
+    interval: int
+    is_ordered: Optional[bool] = None
+
+
+class ShareRoleBlueprint(RoleBlueprint):
+    pass
+
+
 class StageBlueprint(SchemaObjectBlueprint):
     url: Optional[str] = None
     storage_integration: Optional[Ident] = None
@@ -301,12 +337,6 @@ class StageFileBlueprint(SchemaObjectBlueprint):
     local_path: str
     stage_name: SchemaObjectIdent
     stage_path: str
-
-
-class SequenceBlueprint(SchemaObjectBlueprint):
-    start: int
-    interval: int
-    is_ordered: Optional[bool] = None
 
 
 class StreamBlueprint(SchemaObjectBlueprint):
@@ -345,6 +375,8 @@ class TaskBlueprint(SchemaObjectBlueprint, DependsOnMixin):
     user_task_timeout_ms: Optional[int] = None
     suspend_task_after_num_failures: Optional[int] = None
     error_integration: Optional[Ident] = None
+    task_auto_retry_attempts: Optional[int] = None
+    user_task_minimum_trigger_interval_in_seconds: Optional[int] = None
 
 
 class TechnicalRoleBlueprint(RoleBlueprint):
@@ -369,6 +401,7 @@ class UserBlueprint(AbstractBlueprint):
     password: Optional[str] = None
     rsa_public_key: Optional[str] = None
     rsa_public_key_2: Optional[str] = None
+    type: Optional[str] = None
     default_warehouse: Optional[AccountObjectIdent] = None
     default_namespace: Optional[Union[DatabaseIdent, SchemaIdent]] = None
     session_params: Optional[Dict[str, Union[bool, float, int, str]]] = None

@@ -31,10 +31,16 @@ class AbstractIdent(ABC):
         return f"<{self.__class__.__name__}={str(self)}>"
 
     def __eq__(self, other):
-        if not isinstance(other, AbstractIdent):
-            raise NotImplementedError
+        if isinstance(other, AbstractIdent):
+            return str(self) == str(other)
 
-        return str(self) == str(other)
+        if isinstance(other, str):
+            return str(self) == other
+
+        if other is None:
+            return False
+
+        raise NotImplementedError
 
     def _validate_part(self, val):
         val = str(val)
@@ -107,14 +113,19 @@ class DatabaseIdent(AbstractIdentWithPrefix):
         return [f"{self.env_prefix}{self.database}"], None
 
 
-class InboundShareIdent(AbstractIdent):
-    def __init__(self, organization, account, share):
-        self.organization = self._validate_part(organization)
-        self.account = self._validate_part(account)
-        self.share = self._validate_part(share)
+class DatabaseRoleIdent(AbstractIdentWithPrefix):
+    def __init__(self, env_prefix, database, name):
+        super().__init__(env_prefix)
+
+        self.database = self._validate_part(database)
+        self.name = self._validate_part(name)
 
     def parts_for_format(self):
-        return [self.organization, self.account, self.share], None
+        return [f"{self.env_prefix}{self.database}", self.name], None
+
+    @property
+    def database_full_name(self):
+        return DatabaseIdent(self.env_prefix, self.database)
 
 
 class OutboundShareIdent(AbstractIdentWithPrefix):

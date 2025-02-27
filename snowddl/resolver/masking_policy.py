@@ -1,3 +1,5 @@
+from json import loads
+
 from snowddl.blueprint import MaskingPolicyBlueprint, ObjectType, Edition, SchemaObjectIdent
 from snowddl.resolver.abc_schema_object_resolver import AbstractSchemaObjectResolver, ResolveResult
 
@@ -27,6 +29,7 @@ class MaskingPolicyResolver(AbstractSchemaObjectResolver):
                 "database": r["database_name"],
                 "schema": r["schema_name"],
                 "name": r["name"],
+                "options": loads(r["options"]) if r["options"] else {},
                 "comment": r["comment"] if r["comment"] else None,
             }
 
@@ -52,9 +55,11 @@ class MaskingPolicyResolver(AbstractSchemaObjectResolver):
         r = cur.fetchone()
 
         # If signature or return type was changed, policy and all references must be dropped and created again
-        if r["signature"] != f"({', '.join([f'{a.name} {a.type.base_type.name}' for a in bp.arguments])})" or r[
-            "return_type"
-        ] != str(bp.returns):
+        if (
+            r["signature"] != f"({', '.join([f'{a.name} {a.type.base_type.name}' for a in bp.arguments])})"
+            or r["return_type"] != str(bp.returns)
+            or row["options"].get("EXEMPT_OTHER_POLICIES", False) != bp.exempt_other_policies
+        ):
             self._drop_policy_refs(bp.full_name)
             self._drop_policy(bp.full_name)
 
@@ -135,6 +140,9 @@ class MaskingPolicyResolver(AbstractSchemaObjectResolver):
                 "body": bp.body,
             },
         )
+
+        if bp.exempt_other_policies:
+            query.append_nl("EXEMPT_OTHER_POLICIES = TRUE")
 
         if bp.comment:
             query.append_nl(

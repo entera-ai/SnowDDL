@@ -1,12 +1,114 @@
 # Changelog
 
+## [0.33.0] - 2024-10-11
+
+This is a major update to policies, which introduces some breaking changes. [Read more about it](https://docs.snowddl.com/breaking-changes-log/0.33.0-october-2024).
+
+- Introduced `ACCOUNT_POLICY` config to set ACCOUNT-level policies. Currently only `NETWORK_POLICY` is supported, but more policy types will be added in the future.
+- Reworked `NETWORK_POLICY` object type. Now it behaves similarly to other policies.
+- Setting `NETWORK_POLICY` on `ACCOUNT` now requires `account_policy.yaml`. Setting it via `account_params.yaml` no longer works.
+- Setting `NETWORK_POLICY` on `USER` now requires explicit `network_policy` parameter. Setting it via `session_params` no longer works.
+- It is now possible (and recommended) to assign `AGGREGATION_POLICY`, `MASKING_POLICY`, `PROJECTION_POLICY`, `ROW_ACCESS_POLICY` via config of specific `TABLE` or `VIEW` instead of mentioning all references in policy config. Old `references` will keep working, but marked as "deprecated" in documentation.
+- Introduced separate sequence for "destroy" action. Previously we used "apply" sequence for "destroy", but it may cause issues with some policies. Also, "destroy" sequence is much shorter overall.
+- Introduced logic to remove `NETWORK_RULE` references before dropping object itself. Rule cannot be dropped if it still has references.
+- `NETWORK_RULE` can now be ALTER-ed if only VALUES_LIST was changed. Previously network rules were always REPLACED.
+- Added `type` parameter for `USER`.
+
+## [0.32.0] - 2024-09-24
+
+- Introduced basic "elapsed timers" for performance debugging. Can be enabled with `--show-timers` CLI parameter.
+- Added basic support for `VECTOR` type. It can be used for `TABLE`, but not for `FUNCTION` or `PROCEDURE` due to issues with overloading.
+- Converting tables with auto-increment now recognizes `ORDER` and `NOORDER` flags.
+- Converting views without newline after `AS` is now possible.
+
+## [0.31.2] - 2024-09-05
+
+- Implemented custom `__eq__` method to check `Grants`. It helps to take into account edge case for `INTEGRATION` object grants not returning specific integration type from `SHOW GRANTS` command.
+
+## [0.31.1] - 2024-09-05
+
+- Fixed grants on `EXTERNAL ACCESS INTEGRATION` trying to use full object name instead of simplified object name.
+- Reworked how simplified object type names are implemented internally. Now we have normal `singular` name, `singular_for_ref` used in context of policy references, `singular_for_grant` used in context of granting permissions.
+- Added more specific identifier type for `ExternalAccessIntegrationBlueprint.full_name` to prevent issues with env prefix and testing.
+- Fixed test for `TASK` related to Snowflake changing minimum value of `USER_TASK_MINIMUM_TRIGGER_INTERVAL_IN_SECONDS` parameter.
+
+## [0.31.0] - 2024-08-16
+
+- Implemented `share_read` parameter for `BUSINESS ROLE` and `owner_share_read` parameter for `DATABASE` and `SCHEMA`.
+- Using `share_read` parameter now automatically generates `SHARE_ROLES` with `IMPORTED_PRIVILEGE` on specific share.
+- `global_roles` parameter can now accept database roles in addition to normal roles, e.g. `SNOWFLAKE.OBJECT_VIEWER`.
+
+## [0.30.5] - 2024-08-15
+
+- Added missing parameters for `TASK`.
+- Removed unused code and objects related to inbound `SHARES`. Such shares should be created manually by `ACCOUNTADMIN` and granted to business roles via `global_roles`.
+- Skipped data metric functions when reading metadata of existing `FUNCTIONS`.
+
+## [0.30.4] - 2024-08-05
+
+- Added logic to actually remove blueprints from config on `remove_blueprint()` call.
+
+## [0.30.3] - 2024-07-17
+
+- Added `NOTEBOOK` object type, so now it can be used for grants.
+
+## [0.30.2] - 2024-07-17
+
+- Allowed passing raw private key with `SNOWFLAKE_PRIVATE_KEY` environment variable for convenience of GitHub actions. This is an addition to original `SNOWFLAKE_PRIVATE_KEY_PATH`, but does not require creation of file.
+
+## [0.30.1] - 2024-07-15
+
+- Added missing `__init__.py` to `fernet` package. Make sure this package is included by `find:` during build process.
+
+## [0.30.0] - 2024-07-14
+
+- Introduced built-in Fernet encryption for values in YAML configs, which is mostly useful for user passwords and various secrets.
+- Added YAML tags `!encrypt` and `!decrypt`.
+- Added ability to rotate keys for all config values encrypted with Fernet.
+- Made `business_roles` optional for `USER` object type.
+
+## [0.29.2] - 2024-07-11
+
+- Fixed parsing error of `secrets` parameter for `PROCEDURE`.
+
+## [0.29.1] - 2024-07-08
+
+- Implemented parameters `match_by_column_name` and `include_metadata` for `PIPE` object type.
+- Adjusted grant name parsing logic to extract arguments only from object types which support overloading.
+- Included currently unknown data types to graceful warning logic for non-conforming identifiers. It should prevent SnowDDL from terminating with exception in case of encountering manually created `FUNCTION` or `PROCEDURE` with data type like `VECTOR` or `MAP`.
+
+## [0.29.0] - 2024-06-12
+
+- Implemented `AGGREGATION_POLICY`, `PROJECTION_POLICY` object types.
+- Added property `exempt_other_policies` for `MASKING_POLICY`.
+- Added CLI option `--apply-all-policy` to execute SQL for all types of policies.
+- Prepared test objects for all types of policies.
+
+## [0.28.3] - 2024-06-08
+
+- Implemented graceful warning when encounter identifier which does not conform to SnowDDL standards while processing existing role grants. Previously it caused SnowDDL to stop with hard error.
+
+## [0.28.2] - 2024-05-28
+
+- Relaxed view parsing regexp in `VIEW` converter.
+
+## [0.28.1] - 2024-05-21
+
+- Refactored default permission model to init into `Config` class directly. No longer depends on parser.
+- Refactored `DatabaseBlueprint` and `SchemaBlueprint` to make `permission_model` back to string and make it optional. It should help to simplify dynamic config generation scenarios when permission models do not matter.
+
+## [0.28.0] - 2024-05-16
+
+- Implemented more advanced pattern matching with wildcards, which is used primarily for business roles.
+- Added new parameters for `DYNAMIC_TABLE` which were introduced when this object type went into General Availability.
+
 ## [0.27.2] - 2024-05-09
 
-- Restore `USAGE` future grant on `STAGE` object type for default permission model. `READ` grant is still not enough to access external stages properly.
+- Restored `USAGE` future grant on `STAGE` object type for default permission model. `READ` grant is still not enough to access external stages properly.
 
 ## [0.27.1] - 2024-05-08
 
-- Grant schema OWNERSHIP privilege to DATABASE OWNER role. Unfortunately, it seems to be the only way to allow external tools to DROP schemas.
+- Granted schema OWNERSHIP privilege to DATABASE OWNER role. Unfortunately, it seems to be the only way to allow external tools to DROP schemas.
 
 ## [0.27.0] - 2024-05-06
 

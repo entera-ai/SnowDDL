@@ -6,9 +6,8 @@ from snowddl.blueprint import (
     AccountGrant,
     FutureGrant,
     SchemaIdent,
-    SchemaObjectIdent,
-    build_grant_name_ident_snowflake,
-    build_future_grant_name_ident_snowflake,
+    build_grant_name_ident,
+    build_future_grant_name_ident,
 )
 from snowddl.resolver.abc_resolver import AbstractResolver, ResolveResult, ObjectType
 
@@ -77,11 +76,17 @@ class AbstractRoleResolver(AbstractResolver):
             if object_type == ObjectType.ACCOUNT:
                 account_grants.append(AccountGrant(privilege=r["privilege"]))
             else:
+                try:
+                    grant_name = build_grant_name_ident(object_type, r["name"])
+                except (KeyError, ValueError):
+                    self.engine.intention_cache.add_invalid_name_warning(object_type, r["name"])
+                    continue
+
                 grants.append(
                     Grant(
                         privilege=r["privilege"],
                         on=object_type,
-                        name=build_grant_name_ident_snowflake(r["name"], object_type),
+                        name=grant_name,
                     )
                 )
 
@@ -100,14 +105,18 @@ class AbstractRoleResolver(AbstractResolver):
                 # Skip future grants on unknown object types
                 continue
 
-            name = build_future_grant_name_ident_snowflake(r["name"])
+            try:
+                grant_name = build_future_grant_name_ident(object_type, r["name"])
+            except ValueError:
+                self.engine.intention_cache.add_invalid_name_warning(object_type, r["name"])
+                continue
 
             future_grants.append(
                 FutureGrant(
                     privilege=r["privilege"],
                     on_future=object_type,
-                    in_parent=ObjectType.SCHEMA if isinstance(name, SchemaIdent) else ObjectType.DATABASE,
-                    name=name,
+                    in_parent=ObjectType.SCHEMA if isinstance(grant_name, SchemaIdent) else ObjectType.DATABASE,
+                    name=grant_name,
                 )
             )
 
@@ -227,10 +236,11 @@ class AbstractRoleResolver(AbstractResolver):
         return ResolveResult.DROP
 
     def create_grant(self, role_name, grant: Grant):
-        if grant.privilege == "USAGE" and grant.on == ObjectType.ROLE:
+        if grant.privilege == "USAGE" and grant.on in (ObjectType.ROLE, ObjectType.DATABASE_ROLE):
             self.engine.execute_safe_ddl(
-                "GRANT ROLE {name:i} TO ROLE {role_name:i}",
+                "GRANT {on:r} {name:i} TO ROLE {role_name:i}",
                 {
+                    "on": grant.on.singular_for_grant,
                     "name": grant.name,
                     "role_name": role_name,
                 },
@@ -240,7 +250,7 @@ class AbstractRoleResolver(AbstractResolver):
                 "GRANT {privilege:r} ON {on:r} {name:i} TO ROLE {role_name:i}",
                 {
                     "privilege": grant.privilege,
-                    "on": grant.on.singular,
+                    "on": grant.on.singular_for_grant,
                     "name": grant.name,
                     "role_name": role_name,
                 },
@@ -254,15 +264,16 @@ class AbstractRoleResolver(AbstractResolver):
                 "GRANT {privilege:r} ON {on:r} {name:i} TO ROLE {current_role:i} COPY CURRENT GRANTS",
                 {
                     "privilege": grant.privilege,
-                    "on": grant.on.singular,
+                    "on": grant.on.singular_for_grant,
                     "name": grant.name,
                     "current_role": self.engine.context.current_role,
                 },
             )
-        elif grant.privilege == "USAGE" and grant.on == ObjectType.ROLE:
+        elif grant.privilege == "USAGE" and grant.on in (ObjectType.ROLE, ObjectType.DATABASE_ROLE):
             self.engine.execute_safe_ddl(
-                "REVOKE ROLE {name:i} FROM ROLE {role_name:i}",
+                "REVOKE {on:r} {name:i} FROM ROLE {role_name:i}",
                 {
+                    "on": grant.on.singular_for_grant,
                     "name": grant.name,
                     "role_name": role_name,
                 },
@@ -272,7 +283,7 @@ class AbstractRoleResolver(AbstractResolver):
                 "REVOKE {privilege:r} ON {on:r} {name:i} FROM ROLE {role_name:i}",
                 {
                     "privilege": grant.privilege,
-                    "on": grant.on.singular,
+                    "on": grant.on.singular_for_grant,
                     "name": grant.name,
                     "role_name": role_name,
                 },

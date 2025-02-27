@@ -1,4 +1,6 @@
 from argparse import ArgumentParser, HelpFormatter
+from contextlib import contextmanager
+from cryptography.hazmat.primitives import serialization
 from importlib.util import module_from_spec, spec_from_file_location
 from json import loads as json_loads
 from json.decoder import JSONDecodeError
@@ -6,13 +8,14 @@ from logging import getLogger, Formatter, StreamHandler
 from os import environ, getcwd
 from pathlib import Path
 from snowflake.connector import connect
+from time import perf_counter
 from traceback import TracebackException
 
 from snowddl.blueprint import Ident, ObjectType
 from snowddl.config import SnowDDLConfig
 from snowddl.engine import SnowDDLEngine
-from snowddl.parser import default_parser_sequence, PermissionModelParser, PlaceholderParser
-from snowddl.resolver import default_resolver_sequence
+from snowddl.parser import default_parse_sequence, PermissionModelParser, PlaceholderParser
+from snowddl.resolver import default_resolve_sequence, default_destroy_sequence
 from snowddl.settings import SnowDDLSettings
 from snowddl.version import __version__
 
@@ -21,22 +24,28 @@ class BaseApp:
     application_name = "SnowDDL"
     application_version = __version__
 
-    parser_sequence = default_parser_sequence
-    resolver_sequence = default_resolver_sequence
+    parse_sequence = default_parse_sequence
+    resolve_sequence = default_resolve_sequence
+    destroy_sequence = default_destroy_sequence
 
     def __init__(self):
+        self.elapsed_timers = {}
+
         self.arg_parser = self.init_arguments_parser()
         self.args = self.init_arguments()
         self.logger = self.init_logger()
 
-        self.config_path = self.init_config_path()
-        self.config = self.init_config()
-        self.settings = self.init_settings()
+        with self.measure_elapsed_time("InitConfig"):
+            self.config_path = self.init_config_path()
+            self.config = self.init_config()
+            self.settings = self.init_settings()
 
-        self.engine = self.init_engine()
+        with self.measure_elapsed_time("InitEngine"):
+            self.engine = self.init_engine()
 
     def init_arguments_parser(self):
         formatter = lambda prog: HelpFormatter(prog, max_help_position=36)
+
         parser = ArgumentParser(
             prog="snowddl", description="Object management automation tool for Snowflake", formatter_class=formatter
         )
@@ -124,6 +133,7 @@ class BaseApp:
             "--log-level", help="Log level (possible values: DEBUG, INFO, WARNING; default: INFO)", default="INFO"
         )
         parser.add_argument("--show-sql", help="Show executed DDL queries", default=False, action="store_true")
+        parser.add_argument("--show-timers", help="Show debug timers", default=False, action="store_true")
 
         # Placeholders
         parser.add_argument(
@@ -158,7 +168,28 @@ class BaseApp:
             action="store_true",
         )
         parser.add_argument(
+            "--apply-all-policy", help="Additionally apply changes for all types of policies", default=False, action="store_true"
+        )
+        parser.add_argument(
+            "--apply-account-level-policy",
+            help="Additionally apply changes for ACCOUNT-level policies",
+            default=False,
+            action="store_true",
+        )
+        parser.add_argument(
+            "--apply-aggregation-policy",
+            help="Additionally apply changes to AGGREGATION POLICIES",
+            default=False,
+            action="store_true",
+        )
+        parser.add_argument(
             "--apply-masking-policy", help="Additionally apply changes to MASKING POLICIES", default=False, action="store_true"
+        )
+        parser.add_argument(
+            "--apply-projection-policy",
+            help="Additionally apply changes to PROJECTION POLICIES",
+            default=False,
+            action="store_true",
         )
         parser.add_argument(
             "--apply-row-access-policy",
@@ -175,7 +206,6 @@ class BaseApp:
         parser.add_argument(
             "--apply-resource-monitor", help="Additionally apply changes to RESOURCE MONITORS", default=False, action="store_true"
         )
-        # parser.add_argument('--apply-inbound-share', help="Additionally apply changes to INBOUND SHARES", default=False, action='store_true')
         parser.add_argument(
             "--apply-outbound-share", help="Additionally apply changes to OUTBOUND SHARES", default=False, action="store_true"
         )
@@ -239,7 +269,7 @@ class BaseApp:
 
     def validate_auth_args(self, args):
         if args["authenticator"] == "snowflake":
-            if not args["a"] or not args["u"] or (not args["p"] and not args["k"]):
+            if not args["a"] or not args["u"] or (not args["p"] and not args["k"] and "SNOWFLAKE_PRIVATE_KEY" not in environ):
                 return False
         elif args["authenticator"] == "externalbrowser":
             if not args["a"] or not args["u"]:
@@ -299,7 +329,7 @@ class BaseApp:
             exit(1)
 
         # Blueprints
-        for parser_cls in self.parser_sequence:
+        for parser_cls in self.parse_sequence:
             parser = parser_cls(config, self.config_path)
             parser.load_blueprints()
 
@@ -337,8 +367,25 @@ class BaseApp:
             if self.args.get("apply_replace_table"):
                 settings.execute_replace_table = True
 
+            if self.args.get("apply_all_policy"):
+                settings.execute_account_level_policy = True
+                settings.execute_aggregation_policy = True
+                settings.execute_masking_policy = True
+                settings.execute_projection_policy = True
+                settings.execute_row_access_policy = True
+                settings.execute_network_policy = True
+
+            if self.args.get("apply_account_level_policy"):
+                settings.execute_account_level_policy = True
+
+            if self.args.get("apply_aggregation_policy"):
+                settings.execute_aggregation_policy = True
+
             if self.args.get("apply_masking_policy"):
                 settings.execute_masking_policy = True
+
+            if self.args.get("apply_projection_policy"):
+                settings.execute_projection_policy = True
 
             if self.args.get("apply_row_access_policy"):
                 settings.execute_row_access_policy = True
@@ -351,9 +398,6 @@ class BaseApp:
 
             if self.args.get("apply_resource_monitor"):
                 settings.execute_resource_monitor = True
-
-            if self.args.get("apply_inbound_share"):
-                settings.execute_inbound_share = True
 
             if self.args.get("apply_outbound_share"):
                 settings.execute_outbound_share = True
@@ -416,13 +460,21 @@ class BaseApp:
         }
 
         if self.args.get("authenticator") == "snowflake":
+            key_bytes = None
+
             if self.args.get("k"):
-                from cryptography.hazmat.primitives import serialization
-
                 key_path = Path(self.args.get("k"))
-                key_password = str(self.args.get("passphrase")).encode("utf-8") if self.args.get("passphrase") else None
 
-                pk = serialization.load_pem_private_key(data=key_path.read_bytes(), password=key_password)
+                if not key_path.is_file():
+                    raise ValueError(f"Private key file [{key_path}] does not exist or not a file")
+
+                key_bytes = key_path.read_bytes()
+            elif "SNOWFLAKE_PRIVATE_KEY" in environ:
+                key_bytes = str(environ["SNOWFLAKE_PRIVATE_KEY"]).encode("utf-8")
+
+            if key_bytes:
+                key_password = str(self.args.get("passphrase")).encode("utf-8") if self.args.get("passphrase") else None
+                pk = serialization.load_pem_private_key(data=key_bytes, password=key_password)
 
                 options["private_key"] = pk.private_bytes(
                     encoding=serialization.Encoding.DER,
@@ -453,22 +505,28 @@ class BaseApp:
                 if not self.args.get("env_prefix") and not self.args.get("destroy_without_prefix"):
                     raise ValueError("Argument --env-prefix is required for [destroy] action")
 
-                for resolver_cls in self.resolver_sequence:
-                    resolver = resolver_cls(self.engine)
-                    resolver.destroy()
+                for resolver_cls in self.destroy_sequence:
+                    with self.measure_elapsed_time(resolver_cls.__name__):
+                        resolver = resolver_cls(self.engine)
+                        resolver.destroy()
 
                     error_count += len(resolver.errors)
 
                 self.engine.context.destroy_role_with_prefix()
             else:
-                for resolver_cls in self.resolver_sequence:
-                    resolver = resolver_cls(self.engine)
-                    resolver.resolve()
+                for resolver_cls in self.resolve_sequence:
+                    with self.measure_elapsed_time(resolver_cls.__name__):
+                        resolver = resolver_cls(self.engine)
+                        resolver.resolve()
 
                     error_count += len(resolver.errors)
 
             self.engine.connection.close()
             self.output_engine_stats()
+            self.output_engine_warnings()
+
+            if self.args.get("show_timers"):
+                self.output_app_timers()
 
             if self.args.get("show_sql"):
                 self.output_executed_ddl()
@@ -539,6 +597,18 @@ class BaseApp:
             f"Executed {len(self.engine.executed_ddl)} DDL queries, Suggested {len(self.engine.suggested_ddl)} DDL queries"
         )
 
+    def output_engine_warnings(self):
+        for object_type, object_names in self.engine.intention_cache.invalid_name_warning.items():
+            for name in object_names:
+                self.logger.warning(
+                    f"Detected {object_type.name} with name [{name}] "
+                    f"which does not conform to SnowDDL standards, please rename or drop it manually"
+                )
+
+    def output_app_timers(self):
+        for timer_name, timer_value in self.elapsed_timers.items():
+            self.logger.info(f"Timer [{timer_name}] elapsed time is {timer_value:.3f}s")
+
     def output_suggested_ddl(self):
         if self.engine.suggested_ddl:
             print("--- Suggested DDL ---\n")
@@ -552,6 +622,15 @@ class BaseApp:
 
         for sql in self.engine.executed_ddl:
             print(f"{sql};\n")
+
+    @contextmanager
+    def measure_elapsed_time(self, timer_name: str):
+        start_counter = perf_counter()
+
+        try:
+            yield
+        finally:
+            self.elapsed_timers[timer_name] = perf_counter() - start_counter
 
 
 def entry_point():

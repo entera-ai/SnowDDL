@@ -27,6 +27,9 @@ masking_policy_json_schema = {
         "body": {
             "type": "string"
         },
+        "exempt_other_policies": {
+            "type": "boolean"
+        },
         "references": {
             "type": "array",
             "items": {
@@ -83,6 +86,7 @@ class MaskingPolicyParser(AbstractParser):
             body=f.params["body"],
             arguments=arguments,
             returns=DataType(f.params["returns"]),
+            exempt_other_policies=f.params.get("exempt_other_policies", False),
             references=references,
             comment=f.params.get("comment"),
         )
