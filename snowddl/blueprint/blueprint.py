@@ -119,6 +119,8 @@ class DatabaseBlueprint(AbstractBlueprint):
     owner_warehouse_usage: List[AccountObjectIdent] = []
     owner_account_grants: List[AccountGrant] = []
     owner_global_roles: List[Ident] = []
+    copy_schema_role_grants_to_db_clones: List[str] = []
+    schema_roles: Union[dict, List[str], bool] = []
 
 
 class DynamicTableBlueprint(SchemaObjectBlueprint, DependsOnMixin):
@@ -337,6 +339,7 @@ class SchemaBlueprint(AbstractBlueprint):
     owner_share_read: List[Union[Ident, DatabaseRoleIdent]] = []
     owner_account_grants: List[AccountGrant] = []
     owner_global_roles: List[Ident] = []
+    schema_roles: Union[List[str], bool] = []
 
 
 class SecretBlueprint(SchemaObjectBlueprint):
