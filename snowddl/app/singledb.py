@@ -77,7 +77,7 @@ class SingleDbApp(BaseApp):
             "-r",
             help="Snowflake active role (default: SNOWFLAKE_ROLE env variable)",
             metavar="ROLE",
-            default=environ.get("SNOWFlAKE_ROLE"),
+            default=environ.get("SNOWFLAKE_ROLE"),
         )
         parser.add_argument(
             "-w",
@@ -99,7 +99,7 @@ class SingleDbApp(BaseApp):
         # Generic options
         parser.add_argument(
             "--authenticator",
-            help="Authenticator: 'snowflake' or 'externalbrowser' (to use any IdP and a web browser) (default: SNOWFLAKE_AUTHENTICATOR env variable or 'snowflake')",
+            help="Authenticator: 'snowflake', 'externalbrowser', 'oauth_snowpark' (default: SNOWFLAKE_AUTHENTICATOR env variable or 'snowflake')",
             default=environ.get("SNOWFLAKE_AUTHENTICATOR", "snowflake"),
         )
         parser.add_argument(
@@ -113,6 +113,12 @@ class SingleDbApp(BaseApp):
             default=environ.get("SNOWFLAKE_ENV_PREFIX"),
         )
         parser.add_argument(
+            "--env-prefix-separator",
+            help="Custom separator for Env prefix (supported values are: '__', '_', '$')",
+            choices=["__", "_", "$"],
+            default=environ.get("SNOWFLAKE_ENV_PREFIX_SEPARATOR", "__"),
+        )
+        parser.add_argument(
             "--max-workers", help="Maximum number of workers to resolve objects in parallel", default=None, type=int
         )
 
@@ -120,8 +126,17 @@ class SingleDbApp(BaseApp):
         parser.add_argument(
             "--log-level", help="Log level (possible values: DEBUG, INFO, WARNING; default: INFO)", default="INFO"
         )
-        parser.add_argument("--show-sql", help="Show executed DDL queries", default=False, action="store_true")
-        parser.add_argument("--show-timers", help="Show debug timers", default=False, action="store_true")
+        # fmt: off
+        parser.add_argument(
+            "--show-sql", help="Show executed DDL queries", default=False, action="store_true"
+        )
+        parser.add_argument(
+            "--show-timers", help="Show debug timers", default=False, action="store_true"
+        )
+        # fmt: on
+        parser.add_argument(
+            "--show-unused-files", help="Show warnings for unused config files", default=False, action="store_true"
+        )
 
         # Placeholders
         parser.add_argument(
@@ -211,6 +226,7 @@ class SingleDbApp(BaseApp):
         subparsers.add_parser(
             "destroy", help="Drop objects with specified --env-prefix, use it to reset dev and test environments"
         )
+        subparsers.add_parser("validate", help="Validate config only, do not connect to Snowflake")
 
         return parser
 
@@ -240,10 +256,13 @@ class SingleDbApp(BaseApp):
         return self.convert_config(config)
 
     def convert_config(self, original_config: SnowDDLConfig):
-        singledb_config = SnowDDLConfig(self.args.get("env_prefix"))
+        singledb_config = SnowDDLConfig(self.env_prefix)
 
         for bp_dict in original_config.blueprints.values():
             for bp in bp_dict.values():
+                if isinstance(bp, DatabaseBlueprint) and bp.full_name == self.config_db:
+                    singledb_config.add_blueprint(self.convert_blueprint(bp))
+
                 if isinstance(bp, (SchemaBlueprint, SchemaObjectBlueprint)) and bp.full_name.database_full_name == self.config_db:
                     singledb_config.add_blueprint(self.convert_blueprint(bp))
 
@@ -270,7 +289,7 @@ class SingleDbApp(BaseApp):
             for item in obj.values():
                 self.convert_object_recursive(item)
 
-        if isinstance(obj, (SchemaIdent, SchemaObjectIdent)):
+        if isinstance(obj, (DatabaseIdent, SchemaIdent, SchemaObjectIdent)):
             obj.database = self.target_db.database
 
         return obj
@@ -283,15 +302,18 @@ class SingleDbApp(BaseApp):
         return settings
 
     def execute(self):
+        if self.args.get("action") == "validate":
+            return
+
         error_count = 0
 
-        with self.engine:
-            self.output_engine_context()
+        with self.get_engine() as engine:
+            self.output_engine_context(engine)
 
             if self.args.get("action") == "destroy":
                 for resolver_cls in self.destroy_sequence:
                     with self.measure_elapsed_time(resolver_cls.__name__):
-                        resolver = resolver_cls(self.engine)
+                        resolver = resolver_cls(engine)
                         resolver.destroy()
 
                     error_count += len(resolver.errors)
@@ -299,22 +321,23 @@ class SingleDbApp(BaseApp):
             else:
                 for resolver_cls in self.resolve_sequence:
                     with self.measure_elapsed_time(resolver_cls.__name__):
-                        resolver = resolver_cls(self.engine)
+                        resolver = resolver_cls(engine)
                         resolver.resolve()
 
                     error_count += len(resolver.errors)
 
-            self.engine.connection.close()
-            self.output_engine_stats()
-            self.output_engine_warnings()
+            engine.connection.close()
+
+            self.output_engine_stats(engine)
+            self.output_engine_warnings(engine)
 
             if self.args.get("show_timers"):
                 self.output_app_timers()
 
             if self.args.get("show_sql"):
-                self.output_executed_ddl()
+                self.output_executed_ddl(engine)
 
-            self.output_suggested_ddl()
+            self.output_suggested_ddl(engine)
 
             if error_count > 0:
                 exit(8)

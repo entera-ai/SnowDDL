@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from pathlib import Path
 from string import ascii_letters, digits
 from typing import List, Optional, Tuple
 
@@ -51,7 +52,7 @@ class AbstractIdent(ABC):
         for char in val:
             if char not in self.allowed_chars:
                 raise ValueError(
-                    f"Character [{char}] in not allowed in identifier [{val}], only ASCII letters, digits and single underscores are accepted"
+                    f"Character [{char}] is not allowed in identifier [{val}], only ASCII letters, digits and single underscores are accepted"
                 )
 
         return val.upper()
@@ -67,11 +68,13 @@ class AbstractIdentWithPrefix(AbstractIdent, ABC):
         for char in val:
             if char not in self.allowed_chars:
                 raise ValueError(
-                    f"Character [{char}] in not allowed in env prefix [{val}], only ASCII letters, digits and single underscores are accepted"
+                    f"Character [{char}] is not allowed in env prefix [{val}], only ASCII letters, digits and single underscores are accepted"
                 )
 
-        if val and not val.endswith("__"):
-            raise ValueError(f"Env prefix [{val}] in identifier must end with [__] double underscore")
+        if val and not val.endswith(("__", "_", "$")):
+            raise ValueError(
+                f"Env prefix [{val}] in identifier must end with valid separator like [__] double underscore, [_] single underscore or [$] dollar"
+            )
 
         return val.upper()
 
@@ -184,13 +187,13 @@ class SchemaObjectIdentWithArgs(SchemaObjectIdent):
 
 
 class StageFileIdent(SchemaObjectIdent):
-    def __init__(self, env_prefix, database, schema, name, path):
+    def __init__(self, env_prefix, database, schema, name, path: Path):
         super().__init__(env_prefix, database, schema, name)
 
         self.path = path
 
     def parts_for_format(self):
-        return [f"{self.env_prefix}{self.database}", self.schema, self.name], [self.path]
+        return [f"{self.env_prefix}{self.database}", self.schema, self.name], [self.path.as_posix()]
 
     @property
     def stage_full_name(self):

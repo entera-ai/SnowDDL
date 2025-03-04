@@ -11,6 +11,7 @@ class SnowDDLSettings(BaseModelWithConfig):
     execute_replace_table: bool = False
     execute_account_level_policy: bool = False
     execute_aggregation_policy: bool = False
+    execute_authentication_policy: bool = False
     execute_masking_policy: bool = False
     execute_projection_policy: bool = False
     execute_row_access_policy: bool = False
@@ -27,7 +28,7 @@ class SnowDDLSettings(BaseModelWithConfig):
     include_object_types: List[ObjectType] = []
     include_databases: List[DatabaseIdent] = []
     ignore_ownership: bool = False
-    max_workers: int = 8
+    max_workers: int = 32
 
     # Options specific for snowddl-convert
     convert_function_body_to_file: bool = False

@@ -3,11 +3,12 @@ from .abc_role_resolver import AbstractRoleResolver
 from .abc_schema_object_resolver import AbstractSchemaObjectResolver
 from .account_params import AccountParameterResolver
 from .aggregation_policy import AggregationPolicyResolver
+from .authentication_policy import AuthenticationPolicyResolver
 from .alert import AlertResolver
 from .business_role import BusinessRoleResolver
 from .clone_table import CloneTableResolver
 from .database import DatabaseResolver
-from .database_role import DatabaseRoleResolver
+from .database_access_role import DatabaseAccessRoleResolver
 from .dynamic_table import DynamicTableResolver
 from .event_table import EventTableResolver
 from .external_access_integration import ExternalAccessIntegrationResolver
@@ -17,6 +18,7 @@ from .file_format import FileFormatResolver
 from .foreign_key import ForeignKeyResolver
 from .function import FunctionResolver
 from .hybrid_table import HybridTableResolver
+from .iceberg_table import IcebergTableResolver
 from .masking_policy import MaskingPolicyResolver
 from .materialized_view import MaterializedViewResolver
 from .network_policy import NetworkPolicyResolver
@@ -29,9 +31,9 @@ from .projection_policy import ProjectionPolicyResolver
 from .resource_monitor import ResourceMonitorResolver
 from .row_access_policy import RowAccessPolicyResolver
 from .sequence import SequenceResolver
-from .share_role import ShareRoleResolver
+from .share_access_role import ShareAccessRoleResolver
 from .schema import SchemaResolver
-from .schema_role import SchemaRoleResolver
+from .schema_access_role import SchemaAccessRoleResolver
 from .secret import SecretResolver
 from .stage import StageResolver
 from .stage_file import StageFileResolver
@@ -44,19 +46,19 @@ from .unique_key import UniqueKeyResolver
 from .user import UserResolver
 from .user_role import UserRoleResolver
 from .warehouse import WarehouseResolver
-from .warehouse_role import WarehouseRoleResolver
+from .warehouse_access_role import WarehouseAccessRoleResolver
 
 
 default_resolve_sequence = [
     AccountParameterResolver,
     ResourceMonitorResolver,
     WarehouseResolver,
-    WarehouseRoleResolver,
+    WarehouseAccessRoleResolver,
     DatabaseResolver,
     SchemaResolver,
-    ShareRoleResolver,
-    DatabaseRoleResolver,
-    SchemaRoleResolver,
+    ShareAccessRoleResolver,
+    DatabaseAccessRoleResolver,
+    SchemaAccessRoleResolver,
     SecretResolver,
     NetworkRuleResolver,
     ExternalAccessIntegrationResolver,
@@ -71,15 +73,16 @@ default_resolve_sequence = [
     TableResolver,
     EventTableResolver,
     HybridTableResolver,
+    IcebergTableResolver,
     DynamicTableResolver,
     ExternalTableResolver,
     PrimaryKeyResolver,
     UniqueKeyResolver,
     ForeignKeyResolver,
-    StreamResolver,
     MaterializedViewResolver,
     ViewResolver,
     PipeResolver,
+    StreamResolver,
     TaskResolver,
     AlertResolver,
     # --
@@ -90,6 +93,7 @@ default_resolve_sequence = [
     UserResolver,
     # --
     AggregationPolicyResolver,
+    AuthenticationPolicyResolver,
     MaskingPolicyResolver,
     NetworkPolicyResolver,
     ProjectionPolicyResolver,
@@ -101,16 +105,17 @@ default_destroy_sequence = [
     AccountParameterResolver,
     ResourceMonitorResolver,
     WarehouseResolver,
-    WarehouseRoleResolver,
+    WarehouseAccessRoleResolver,
     # --
     NetworkPolicyResolver,
+    AuthenticationPolicyResolver,
     ExternalAccessIntegrationResolver,
     # --
     DatabaseResolver,
     SchemaResolver,
-    ShareRoleResolver,
-    DatabaseRoleResolver,
-    SchemaRoleResolver,
+    ShareAccessRoleResolver,
+    DatabaseAccessRoleResolver,
+    SchemaAccessRoleResolver,
     # --
     OutboundShareResolver,
     TechnicalRoleResolver,
@@ -135,15 +140,16 @@ singledb_resolve_sequence = [
     TableResolver,
     EventTableResolver,
     HybridTableResolver,
+    IcebergTableResolver,
     DynamicTableResolver,
     ExternalTableResolver,
     PrimaryKeyResolver,
     UniqueKeyResolver,
     ForeignKeyResolver,
-    StreamResolver,
     MaterializedViewResolver,
     ViewResolver,
     PipeResolver,
+    StreamResolver,
     TaskResolver,
     AlertResolver,
     # --

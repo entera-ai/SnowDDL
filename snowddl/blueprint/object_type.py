@@ -28,10 +28,22 @@ class ObjectType(Enum):
         "blueprint_cls": "AlertBlueprint",
     }
 
+    AUTHENTICATION_POLICY = {
+        "singular": "AUTHENTICATION POLICY",
+        "plural": "AUTHENTICATION POLICIES",
+        "blueprint_cls": "AuthenticationPolicyBlueprint",
+    }
+
     CLONE_TABLE = {
         "singular": "CLONE TABLE",
         "plural": "CLONE TABLES",
         "blueprint_cls": "TableBlueprint",
+    }
+
+    CORTEX_SEARCH_SERVICE = {
+        "singular": "CORTEX SEARCH SERVICE",
+        "plural": "CORTEX SEARCH SERVICES",
+        "is_future_grant_supported": True,
     }
 
     DATABASE = {
@@ -107,6 +119,14 @@ class ObjectType(Enum):
         "singular_for_ref": "TABLE",
         "is_future_grant_supported": True,
         "blueprint_cls": "HybridTableBlueprint",
+    }
+
+    ICEBERG_TABLE = {
+        "singular": "ICEBERG TABLE",
+        "plural": "ICEBERG TABLES",
+        "singular_for_ref": "TABLE",
+        "is_future_grant_supported": True,
+        "blueprint_cls": "IcebergTableBlueprint",
     }
 
     # Technical object type, used for GRANTs only
@@ -260,6 +280,13 @@ class ObjectType(Enum):
         "plural": "VIEWS",
         "is_future_grant_supported": True,
         "blueprint_cls": "ViewBlueprint",
+    }
+
+    # Technical object type, used for GRANTs only
+    # There is no blueprint
+    VOLUME = {
+        "singular": "VOLUME",
+        "plural": "VOLUMES",
     }
 
     USER = {

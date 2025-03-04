@@ -1,26 +1,26 @@
 from abc import ABC, abstractmethod
+from logging import getLogger, NullHandler
 from pathlib import Path
-from typing import Callable, Dict, List, Union
+from traceback import TracebackException
+from typing import Callable, Dict, List, Optional, Union
 
 from snowddl.config import SnowDDLConfig
-from snowddl.blueprint import (
-    AccountGrant,
-    BaseDataType,
-    DatabaseRoleIdent,
-    Grant,
-    Ident,
-    NameWithType,
-    ObjectType,
-    ShareRoleBlueprint,
-    build_role_ident,
-)
+from snowddl.blueprint import BaseDataType, NameWithType
 from snowddl.parser._parsed_file import ParsedFile
+from snowddl.parser._scanner import DirectoryScanner
+
+
+logger = getLogger(__name__)
+logger.addHandler(NullHandler())
 
 
 class AbstractParser(ABC):
-    def __init__(self, config: SnowDDLConfig, base_path: Path):
+    def __init__(self, config: SnowDDLConfig, scanner: DirectoryScanner):
         self.config = config
-        self.base_path = base_path
+        self.scanner = scanner
+
+        self.logger = logger
+        self.errors: Dict[str, Exception] = {}
 
         self.env_prefix = config.env_prefix
 
@@ -28,7 +28,54 @@ class AbstractParser(ABC):
     def load_blueprints(self):
         pass
 
-    def parse_single_file(self, path: Path, json_schema: dict, callback: Callable[[ParsedFile], Union[None, Dict]] = None):
+    def get_database_names(self):
+        return [database_name.upper() for database_name in self.scanner.get_database_dir_paths()]
+
+    def get_schema_names_in_database(self, database_name):
+        return [schema_name.upper() for schema_name in self.scanner.get_schema_dir_paths(database_name)]
+
+    def parse_single_entity_file(
+        self, file_key: str, json_schema: dict, callback: Callable[[ParsedFile], Union[None, Dict]] = None
+    ):
+        if not callback:
+            callback = lambda f: f.params
+
+        path = self.scanner.get_single_file_path(file_key)
+
+        if path:
+            try:
+                file = ParsedFile(self, path, json_schema)
+                return callback(file)
+            except Exception as e:
+                self.add_error(e, path)
+
+        return {}
+
+    def parse_multi_entity_file(self, file_key: str, json_schema: dict, callback: Callable[[str, Dict], None]):
+        path = self.scanner.get_single_file_path(file_key)
+
+        if path:
+            try:
+                file = ParsedFile(self, path, json_schema)
+            except Exception as e:
+                self.add_error(e, path)
+                return
+
+            for entity_name, entity_params in file.params.items():
+                try:
+                    callback(entity_name, entity_params)
+                except Exception as e:
+                    self.add_error(e, path, entity_name)
+
+    def parse_schema_object_files(self, object_type: str, json_schema: dict, callback: Callable[[ParsedFile], None]):
+        for path in self.scanner.get_schema_object_file_paths(object_type).values():
+            try:
+                file = ParsedFile(self, path, json_schema)
+                callback(file)
+            except Exception as e:
+                self.add_error(e, path)
+
+    def parse_external_file(self, path: Path, json_schema: dict, callback: Callable[[ParsedFile], Union[None, Dict]] = None):
         if not callback:
             callback = lambda f: f.params
 
@@ -37,17 +84,33 @@ class AbstractParser(ABC):
                 file = ParsedFile(self, path, json_schema)
                 return callback(file)
             except Exception as e:
-                self.config.add_error(path, e)
+                self.add_error(e, path)
 
         return {}
 
-    def parse_schema_object_files(self, object_type: str, json_schema: dict, callback: Callable[[ParsedFile], None]):
-        for path in self.base_path.glob(f"*/*/{object_type}/*.yaml"):
-            try:
-                file = ParsedFile(self, path, json_schema)
-                callback(file)
-            except Exception as e:
-                self.config.add_error(path, e)
+    def add_error(self, exc: Exception, path: Path, entity_name: Optional[str] = None):
+        traceback = "".join(TracebackException.from_exception(exc).format())
+
+        if entity_name:
+            self.logger.warning(f"Failed to parse [{entity_name}] in config file [{path}]\n{traceback}")
+            error_key = f"{path}:{entity_name}"
+        else:
+            self.logger.warning(f"Failed to parse config file [{path}]\n{traceback}")
+            error_key = str(path)
+
+        self.errors[error_key] = exc
+
+    def normalise_sql_text_param(self, text: str):
+        return text.lstrip(" \t\n\r").rstrip(" \t\n\r;")
+
+    def normalise_params_list(self, params):
+        if params is None:
+            return None
+
+        if isinstance(params, list):
+            return [p.upper() for p in params]
+
+        raise ValueError(f"Value is neither None, nor list [{params}]")
 
     def normalise_params_dict(self, params):
         if params is None:
@@ -98,60 +161,3 @@ class AbstractParser(ABC):
                 )
 
         return base_name
-
-    def build_share_role_grant(self, share_name):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.ROLE,
-            name=build_role_ident(self.env_prefix, share_name, self.config.SHARE_ROLE_SUFFIX),
-        )
-
-    def build_share_role_blueprint(self, share_name):
-        return ShareRoleBlueprint(
-            full_name=build_role_ident(self.env_prefix, share_name, self.config.SHARE_ROLE_SUFFIX),
-            grants=[
-                Grant(
-                    privilege="IMPORTED PRIVILEGES",
-                    on=ObjectType.DATABASE,
-                    name=Ident(share_name),
-                ),
-            ],
-        )
-
-    def build_warehouse_role_grant(self, warehouse_name, grant_type):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.ROLE,
-            name=build_role_ident(self.env_prefix, warehouse_name, grant_type, self.config.WAREHOUSE_ROLE_SUFFIX),
-        )
-
-    def build_technical_role_grant(self, technical_role_name):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.ROLE,
-            name=build_role_ident(self.env_prefix, technical_role_name, self.config.TECHNICAL_ROLE_SUFFIX),
-        )
-
-    def build_account_grant(self, privilege):
-        return AccountGrant(privilege=privilege.upper())
-
-    def build_global_role_grant(self, global_role_name):
-        if "." in global_role_name:
-            return Grant(
-                privilege="USAGE",
-                on=ObjectType.DATABASE_ROLE,
-                name=DatabaseRoleIdent("", *global_role_name.split(".", 2)),
-            )
-
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.ROLE,
-            name=Ident(global_role_name),
-        )
-
-    def build_integration_usage_grant(self, integration_name):
-        return Grant(
-            privilege="USAGE",
-            on=ObjectType.INTEGRATION,
-            name=Ident(integration_name),
-        )

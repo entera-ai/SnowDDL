@@ -65,14 +65,16 @@ class TableResolver(AbstractSchemaObjectResolver):
         query = self._build_create_table(bp)
         self.engine.execute_safe_ddl(query)
 
-        self._compare_search_optimization(bp)
+        self._create_search_optimization(bp)
 
         return ResolveResult.CREATE
 
     def compare_object(self, bp: TableBlueprint, row: dict):
         safe_alters = []
         unsafe_alters = []
+
         replace_reasons = []
+        replace_notices = []
 
         bp_cols = {str(c.name): c for c in bp.columns}
         snow_cols = self._get_existing_columns(bp)
@@ -92,6 +94,7 @@ class TableResolver(AbstractSchemaObjectResolver):
                 )
 
                 remaining_col_names.remove(col_name)
+                replace_notices.append(f"Column {col_name} is about to be dropped")
                 continue
 
             bp_c = bp_cols[col_name]
@@ -314,8 +317,10 @@ class TableResolver(AbstractSchemaObjectResolver):
         result = ResolveResult.NOCHANGE
 
         if replace_reasons:
-            replace_query = "\n".join(f"-- {r}" for r in replace_reasons) + "\n" + str(self._build_create_table(bp, snow_cols))
+            # fmt: off
+            replace_query = "\n".join(f"-- {r}" for r in replace_reasons + replace_notices) + "\n" + str(self._build_create_table(bp, snow_cols))
             self.engine.execute_unsafe_ddl(replace_query, condition=self.engine.settings.execute_replace_table)
+            # fmt: on
 
             result = ResolveResult.REPLACE
 
@@ -342,7 +347,7 @@ class TableResolver(AbstractSchemaObjectResolver):
 
         # If table was re-created, apply or suggest search optimization using exactly the same condition value
         if result == ResolveResult.REPLACE:
-            self._compare_search_optimization(bp, False, condition=self.engine.settings.execute_replace_table)
+            self._create_search_optimization(bp, condition=self.engine.settings.execute_replace_table)
         else:
             if self._compare_search_optimization(bp, row["search_optimization"]) and result == ResolveResult.NOCHANGE:
                 result = ResolveResult.ALTER
@@ -486,7 +491,8 @@ class TableResolver(AbstractSchemaObjectResolver):
             query.append_nl("AS")
             query.append_nl("SELECT")
 
-            for idx, c in enumerate(bp.columns):
+            # Skip virtual columns before enumeration
+            for idx, c in enumerate(c for c in bp.columns if c.expression is None):
                 col_name = str(c.name)
 
                 if col_name in snow_cols:
@@ -523,15 +529,25 @@ class TableResolver(AbstractSchemaObjectResolver):
                         )
                 else:
                     # Column does not exist, use default value with type cast
-                    query.append_nl(
-                        "    {comma:r}{col_val}::{col_type:r} AS {col_name:i}",
-                        {
-                            "comma": "  " if idx == 0 else ", ",
-                            "col_name": c.name,
-                            "col_type": c.type,
-                            "col_val": c.default,
-                        },
-                    )
+                    if c.default is not None:
+                        query.append_nl(
+                            "    {comma:r}{col_default:r}::{col_type:r} AS {col_name:i}",
+                            {
+                                "comma": "  " if idx == 0 else ", ",
+                                "col_name": c.name,
+                                "col_type": c.type,
+                                "col_default": self._normalize_bp_default(c.default),
+                            },
+                        )
+                    else:
+                        query.append_nl(
+                            "    {comma:r}NULL::{col_type:r} AS {col_name:i}",
+                            {
+                                "comma": "  " if idx == 0 else ", ",
+                                "col_name": c.name,
+                                "col_type": c.type,
+                            },
+                        )
 
             query.append_nl(
                 "FROM {full_name:i}",
@@ -548,8 +564,34 @@ class TableResolver(AbstractSchemaObjectResolver):
 
         return bp_cluster_by == snow_cluster_by
 
+    def _create_search_optimization(self, bp: TableBlueprint, condition=True):
+        # Legacy search optimization on an entire table
+        if isinstance(bp.search_optimization, bool):
+            if bp.search_optimization:
+                self.engine.execute_unsafe_ddl(
+                    "ALTER TABLE {full_name:i} ADD SEARCH OPTIMIZATION",
+                    {
+                        "full_name": bp.full_name,
+                    },
+                    condition=condition,
+                )
+
+            return
+
+        # Detailed search optimization on specific columns
+        for bp_item in bp.search_optimization:
+            self.engine.execute_unsafe_ddl(
+                "ALTER TABLE {full_name:i} ADD SEARCH OPTIMIZATION ON {method:r}({target:i})",
+                {
+                    "full_name": bp.full_name,
+                    "method": bp_item.method,
+                    "target": bp_item.target,
+                },
+                condition=condition,
+            )
+
     def _compare_search_optimization(self, bp: TableBlueprint, is_search_optimization_enabled=False, condition=True):
-        # Legacy search optimization on the whole table
+        # Legacy search optimization on an entire table
         if isinstance(bp.search_optimization, bool):
             if bp.search_optimization and not is_search_optimization_enabled:
                 self.engine.execute_unsafe_ddl(

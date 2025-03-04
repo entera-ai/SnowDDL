@@ -1,0 +1,18 @@
+database_owner_model:
+  inherit_from: default
+  ruleset: DATABASE_OWNER
+
+schema_owner_model:
+  inherit_from: default
+  ruleset: SCHEMA_OWNER
+
+iceberg:
+  inherit_from: default
+  owner_create_grants:
+    - ICEBERG_TABLE
+  owner_future_grants:
+    ICEBERG_TABLE: [OWNERSHIP]
+  write_future_grants:
+    ICEBERG_TABLE: [INSERT, UPDATE, DELETE, TRUNCATE]
+  read_future_grants:
+    ICEBERG_TABLE: [SELECT, REFERENCES]

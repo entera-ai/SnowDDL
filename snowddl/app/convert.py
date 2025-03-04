@@ -56,7 +56,7 @@ class ConvertApp(BaseApp):
             "-r",
             help="Snowflake active role (default: SNOWFLAKE_ROLE env variable)",
             metavar="ROLE",
-            default=environ.get("SNOWFlAKE_ROLE"),
+            default=environ.get("SNOWFLAKE_ROLE"),
         )
         parser.add_argument(
             "-w",
@@ -68,7 +68,7 @@ class ConvertApp(BaseApp):
         # Options
         parser.add_argument(
             "--authenticator",
-            help="Authenticator: 'snowflake' or 'externalbrowser' (to use any IdP and a web browser) (default: SNOWFLAKE_AUTHENTICATOR env variable or 'snowflake')",
+            help="Authenticator: 'snowflake', 'externalbrowser', 'oauth_snowpark' (default: SNOWFLAKE_AUTHENTICATOR env variable or 'snowflake')",
             default=environ.get("SNOWFLAKE_AUTHENTICATOR", "snowflake"),
         )
         parser.add_argument(
@@ -80,6 +80,12 @@ class ConvertApp(BaseApp):
             "--env-prefix",
             help="Env prefix added to global object names, used to separate environments (e.g. DEV, PROD)",
             default=environ.get("SNOWFLAKE_ENV_PREFIX"),
+        )
+        parser.add_argument(
+            "--env-prefix-separator",
+            help="Custom separator for Env prefix (supported values are: '__', '_', '$')",
+            choices=["__", "_", "$"],
+            default=environ.get("SNOWFLAKE_ENV_PREFIX_SEPARATOR", "__"),
         )
         parser.add_argument(
             "--max-workers", help="Maximum number of workers to resolve objects in parallel", default=None, type=int
@@ -136,7 +142,7 @@ class ConvertApp(BaseApp):
         return config_path
 
     def init_config(self):
-        return SnowDDLConfig(self.args.get("env_prefix"))
+        return SnowDDLConfig(self.env_prefix)
 
     def init_settings(self):
         settings = SnowDDLSettings()
@@ -182,11 +188,11 @@ class ConvertApp(BaseApp):
     def execute(self):
         error_count = 0
 
-        with self.engine:
-            self.output_engine_context()
+        with self.get_engine() as engine:
+            self.output_engine_context(engine)
 
             for converter_cls in default_converter_sequence:
-                converter = converter_cls(self.engine, self.config_path)
+                converter = converter_cls(engine, self.config_path)
                 converter.convert()
 
                 error_count += len(converter.errors)

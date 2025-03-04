@@ -1,4 +1,5 @@
 from abc import ABC
+from pathlib import Path
 from typing import Optional, List, Dict, Set, Union, TypeVar
 
 from .column import (
@@ -11,12 +12,13 @@ from .column import (
     SearchOptimizationItem,
 )
 from .data_type import DataType
-from .grant import AccountGrant, Grant, FutureGrant
+from .grant import AccountGrant, Grant, FutureGrant, GrantPattern
 from .ident import (
     AbstractIdent,
     Ident,
     AccountObjectIdent,
     DatabaseIdent,
+    DatabaseRoleIdent,
     AccountIdent,
     OutboundShareIdent,
     SchemaIdent,
@@ -25,9 +27,11 @@ from .ident import (
     StageFileIdent,
     TableConstraintIdent,
 )
+from .ident_pattern import IdentPattern
 from .object_type import ObjectType
 from .reference import (
     AggregationPolicyReference,
+    AuthenticationPolicyReference,
     ForeignKeyReference,
     IndexReference,
     MaskingPolicyReference,
@@ -40,6 +44,10 @@ from .stage import StageWithPath
 from ..model import BaseModelWithConfig
 
 
+class DependsOnMixin(BaseModelWithConfig, ABC):
+    depends_on: Set[AbstractIdent] = set()
+
+
 class AbstractBlueprint(BaseModelWithConfig, ABC):
     full_name: AbstractIdent
     comment: Optional[str] = None
@@ -49,15 +57,11 @@ class SchemaObjectBlueprint(AbstractBlueprint, ABC):
     full_name: SchemaObjectIdent
 
 
-class RoleBlueprint(AbstractBlueprint):
+class RoleBlueprint(AbstractBlueprint, DependsOnMixin):
     full_name: AccountObjectIdent
     grants: List[Grant] = []
     account_grants: List[AccountGrant] = []
     future_grants: List[FutureGrant] = []
-
-
-class DependsOnMixin(BaseModelWithConfig, ABC):
-    depends_on: Set[AbstractIdent] = set()
 
 
 class AccountParameterBlueprint(AbstractBlueprint):
@@ -72,30 +76,51 @@ class AggregationPolicyBlueprint(SchemaObjectBlueprint):
 
 class AlertBlueprint(SchemaObjectBlueprint):
     full_name: SchemaObjectIdent
-    warehouse: AccountObjectIdent
+    warehouse: Optional[AccountObjectIdent] = None
     schedule: str
     condition: str
     action: str
 
 
-class BusinessRoleBlueprint(RoleBlueprint):
-    pass
+class AuthenticationPolicyBlueprint(SchemaObjectBlueprint):
+    authentication_methods: List[str]
+    mfa_authentication_methods: List[str]
+    mfa_enrollment: str
+    client_types: List[str]
+    security_integrations: List[str]
+    references: List[AuthenticationPolicyReference] = []
+
+
+class BusinessRoleBlueprint(AbstractBlueprint):
+    full_name: AccountObjectIdent
+    database_owner: List[IdentPattern] = []
+    database_write: List[IdentPattern] = []
+    database_read: List[IdentPattern] = []
+    schema_owner: List[IdentPattern] = []
+    schema_write: List[IdentPattern] = []
+    schema_read: List[IdentPattern] = []
+    share_read: List[Union[Ident, DatabaseRoleIdent]] = []
+    warehouse_usage: List[AccountObjectIdent] = []
+    warehouse_monitor: List[AccountObjectIdent] = []
+    technical_roles: List[AccountObjectIdent] = []
+    global_roles: List[Ident] = []
 
 
 class DatabaseBlueprint(AbstractBlueprint):
     full_name: DatabaseIdent
     permission_model: Optional[str] = None
+    is_sandbox: Optional[bool] = None
     is_transient: Optional[bool] = None
     retention_time: Optional[int] = None
-    is_sandbox: Optional[bool] = None
-    owner_additional_grants: List[Grant] = []
-    owner_additional_account_grants: List[AccountGrant] = []
+    owner_database_write: List[IdentPattern] = []
+    owner_database_read: List[IdentPattern] = []
+    owner_integration_usage: List[Ident] = []
+    owner_share_read: List[Union[Ident, DatabaseRoleIdent]] = []
+    owner_warehouse_usage: List[AccountObjectIdent] = []
+    owner_account_grants: List[AccountGrant] = []
+    owner_global_roles: List[Ident] = []
     copy_schema_role_grants_to_db_clones: List[str] = []
     schema_roles: Union[dict, List[str], bool] = []
-
-
-class DatabaseRoleBlueprint(RoleBlueprint, DependsOnMixin):
-    pass
 
 
 class DynamicTableBlueprint(SchemaObjectBlueprint, DependsOnMixin):
@@ -111,7 +136,7 @@ class DynamicTableBlueprint(SchemaObjectBlueprint, DependsOnMixin):
 
 
 class EventTableBlueprint(SchemaObjectBlueprint):
-    change_tracking: bool
+    change_tracking: bool = False
 
 
 class ExternalAccessIntegrationBlueprint(AbstractBlueprint):
@@ -156,7 +181,7 @@ class ExternalTableBlueprint(SchemaObjectBlueprint):
 
 class FileFormatBlueprint(SchemaObjectBlueprint):
     type: str
-    format_options: Optional[Dict[str, Union[bool, float, int, str, list]]] = None
+    format_options: Dict[str, Union[bool, float, int, str, list]] = {}
 
 
 class ForeignKeyBlueprint(SchemaObjectBlueprint):
@@ -193,6 +218,17 @@ class HybridTableBlueprint(SchemaObjectBlueprint, DependsOnMixin):
     indexes: Optional[List[IndexReference]] = None
 
 
+class IcebergTableBlueprint(SchemaObjectBlueprint):
+    external_volume: Ident
+    catalog: Ident
+    catalog_table_name: Optional[str] = None
+    catalog_namespace: Optional[str] = None
+    metadata_file_path: Optional[str] = None
+    base_location: Optional[str] = None
+    replace_invalid_characters: bool = False
+    auto_refresh: bool = False
+
+
 class MaterializedViewBlueprint(SchemaObjectBlueprint):
     text: str
     columns: Optional[List[ViewColumn]] = None
@@ -226,8 +262,8 @@ class NetworkRuleBlueprint(SchemaObjectBlueprint):
 class OutboundShareBlueprint(AbstractBlueprint):
     full_name: OutboundShareIdent
     accounts: List[AccountIdent] = []
-    share_restrictions: bool = False
-    grants: List[Grant] = []
+    share_restrictions: Optional[bool] = None
+    grant_patterns: List[GrantPattern] = []
 
 
 class PipeBlueprint(SchemaObjectBlueprint):
@@ -254,7 +290,7 @@ class PrimaryKeyBlueprint(SchemaObjectBlueprint):
 class ProcedureBlueprint(SchemaObjectBlueprint):
     full_name: SchemaObjectIdentWithArgs
     language: str
-    body: str
+    body: Optional[str] = None
     arguments: List[ArgumentWithType]
     returns: Union[DataType, List[NameWithType]]
     is_strict: bool = False
@@ -289,16 +325,21 @@ class RowAccessPolicyBlueprint(SchemaObjectBlueprint):
 class SchemaBlueprint(AbstractBlueprint):
     full_name: SchemaIdent
     permission_model: Optional[str] = None
+    is_sandbox: Optional[bool] = None
     is_transient: Optional[bool] = None
     retention_time: Optional[int] = None
-    is_sandbox: Optional[bool] = None
-    owner_additional_grants: List[Grant] = []
-    owner_additional_account_grants: List[AccountGrant] = []
+    external_volume: Optional[Ident] = None
+    catalog: Optional[Ident] = None
+    owner_database_write: List[IdentPattern] = []
+    owner_database_read: List[IdentPattern] = []
+    owner_schema_write: List[IdentPattern] = []
+    owner_schema_read: List[IdentPattern] = []
+    owner_integration_usage: List[Ident] = []
+    owner_warehouse_usage: List[AccountObjectIdent] = []
+    owner_share_read: List[Union[Ident, DatabaseRoleIdent]] = []
+    owner_account_grants: List[AccountGrant] = []
+    owner_global_roles: List[Ident] = []
     schema_roles: Union[List[str], bool] = []
-
-
-class SchemaRoleBlueprint(RoleBlueprint, DependsOnMixin):
-    pass
 
 
 class SecretBlueprint(SchemaObjectBlueprint):
@@ -318,10 +359,6 @@ class SequenceBlueprint(SchemaObjectBlueprint):
     is_ordered: Optional[bool] = None
 
 
-class ShareRoleBlueprint(RoleBlueprint):
-    pass
-
-
 class StageBlueprint(SchemaObjectBlueprint):
     url: Optional[str] = None
     storage_integration: Optional[Ident] = None
@@ -334,17 +371,17 @@ class StageBlueprint(SchemaObjectBlueprint):
 
 class StageFileBlueprint(SchemaObjectBlueprint):
     full_name: StageFileIdent
-    local_path: str
+    local_path: Path
     stage_name: SchemaObjectIdent
-    stage_path: str
+    stage_path: Path
 
 
 class StreamBlueprint(SchemaObjectBlueprint):
     object_type: ObjectType
     object_name: SchemaObjectIdent
-    append_only: Optional[bool] = None
-    insert_only: Optional[bool] = None
-    show_initial_rows: Optional[bool] = None
+    append_only: bool = False
+    insert_only: bool = False
+    show_initial_rows: bool = None
 
 
 class TableBlueprint(SchemaObjectBlueprint):
@@ -379,8 +416,10 @@ class TaskBlueprint(SchemaObjectBlueprint, DependsOnMixin):
     user_task_minimum_trigger_interval_in_seconds: Optional[int] = None
 
 
-class TechnicalRoleBlueprint(RoleBlueprint):
-    pass
+class TechnicalRoleBlueprint(AbstractBlueprint):
+    full_name: AccountObjectIdent
+    grant_patterns: List[GrantPattern] = []
+    account_grants: List[AccountGrant] = []
 
 
 class UniqueKeyBlueprint(SchemaObjectBlueprint):
@@ -404,27 +443,29 @@ class UserBlueprint(AbstractBlueprint):
     type: Optional[str] = None
     default_warehouse: Optional[AccountObjectIdent] = None
     default_namespace: Optional[Union[DatabaseIdent, SchemaIdent]] = None
-    session_params: Optional[Dict[str, Union[bool, float, int, str]]] = None
+    session_params: Dict[str, Union[bool, float, int, str]] = {}
 
 
 class ViewBlueprint(SchemaObjectBlueprint, DependsOnMixin):
     text: str
     columns: Optional[List[ViewColumn]] = None
     is_secure: bool = False
+    change_tracking: bool = False
 
 
 class WarehouseBlueprint(AbstractBlueprint):
     full_name: AccountObjectIdent
     type: str
     size: str
-    auto_suspend: int
-    min_cluster_count: Optional[int] = None
-    max_cluster_count: Optional[int] = None
-    scaling_policy: Optional[str] = None
+    auto_suspend: int = 60
+    min_cluster_count: int = 1
+    max_cluster_count: int = 1
+    scaling_policy: str = "STANDARD"
     resource_monitor: Optional[Union[Ident, AccountObjectIdent]] = None
     enable_query_acceleration: bool = False
-    query_acceleration_max_scale_factor: Optional[int] = None
-    warehouse_params: Optional[Dict[str, Union[bool, float, int, str]]] = None
+    query_acceleration_max_scale_factor: int = 8
+    warehouse_params: Dict[str, Union[bool, float, int, str]] = {}
+    resource_constraint: Optional[str] = None
 
 
 T_Blueprint = TypeVar("T_Blueprint", bound=AbstractBlueprint)

@@ -1,13 +1,11 @@
 from collections import defaultdict
-from fnmatch import translate
-from pathlib import Path
-from re import compile
 from typing import Dict, List, Type, Optional, Union
 
 from snowddl.blueprint import (
     AbstractBlueprint,
     AbstractIdentWithPrefix,
     AbstractPolicyReference,
+    IdentPattern,
     ObjectType,
     PermissionModel,
     PermissionModelRuleset,
@@ -18,13 +16,14 @@ from snowddl.blueprint import (
 
 
 class SnowDDLConfig:
+    DATABASE_ACCESS_ROLE_SUFFIX = "D_ROLE"
+    SCHEMA_ACCESS_ROLE_SUFFIX = "S_ROLE"
+    SHARE_ACCESS_ROLE_SUFFIX = "SH_ROLE"
+    WAREHOUSE_ACCESS_ROLE_SUFFIX = "W_ROLE"
+
     BUSINESS_ROLE_SUFFIX = "B_ROLE"
-    DATABASE_ROLE_SUFFIX = "D_ROLE"
-    SCHEMA_ROLE_SUFFIX = "S_ROLE"
-    SHARE_ROLE_SUFFIX = "SH_ROLE"
     TECHNICAL_ROLE_SUFFIX = "T_ROLE"
     USER_ROLE_SUFFIX = "U_ROLE"
-    WAREHOUSE_ROLE_SUFFIX = "W_ROLE"
 
     OWNER_ROLE_TYPE = "OWNER"
     WRITE_ROLE_TYPE = "WRITE"
@@ -38,55 +37,16 @@ class SnowDDLConfig:
         self.env_prefix = self._init_env_prefix(env_prefix)
 
         self.blueprints: Dict[Type[T_Blueprint], Dict[str, T_Blueprint]] = defaultdict(dict)
-        self.errors: List[dict] = []
-
         self.placeholders: Dict[str, Union[bool, float, int, str]] = {}
         self.permission_models: Dict[str, PermissionModel] = self._init_permission_models()
 
     def get_blueprints_by_type(self, cls: Type[T_Blueprint]) -> Dict[str, T_Blueprint]:
         return self.blueprints.get(cls, {})
 
-    def get_blueprints_by_type_and_pattern(self, cls: Type[T_Blueprint], pattern: str) -> Dict[str, T_Blueprint]:
-        pattern = pattern.upper()
-        all_blueprints = self.blueprints.get(cls, {})
+    def get_blueprints_by_type_and_pattern(self, cls: Type[T_Blueprint], pattern: IdentPattern) -> Dict[str, T_Blueprint]:
+        return {full_name: bp for full_name, bp in self.blueprints.get(cls, {}).items() if pattern.is_match_ident(bp.full_name)}
 
-        # Simple search by blueprint name for patterns without any special chars
-        if not any(special_char in pattern for special_char in ["|", "!", "*", "?", "[", "]"]):
-            # Add env prefix to pattern IF blueprint type supports it
-            if "full_name" in cls.model_fields and issubclass(cls.model_fields["full_name"].annotation, AbstractIdentWithPrefix):
-                pattern = f"{self.env_prefix}{pattern}"
-
-            return {pattern: all_blueprints[pattern]} if pattern in all_blueprints else {}
-
-        include_full_names = set()
-        exclude_full_names = set()
-
-        for sub_pattern in pattern.split("|"):
-            is_exclude = False
-
-            # Exclude sub-pattern
-            if sub_pattern.startswith("!"):
-                is_exclude = True
-                sub_pattern = sub_pattern[1:]
-
-            # Add env prefix to sub-pattern IF blueprint type supports it
-            if "full_name" in cls.model_fields and issubclass(cls.model_fields["full_name"].annotation, AbstractIdentWithPrefix):
-                sub_pattern = f"{self.env_prefix}{sub_pattern}"
-
-            regexp = compile(translate(sub_pattern))
-
-            if is_exclude:
-                exclude_full_names.update(full_name for full_name in all_blueprints if regexp.match(full_name))
-            else:
-                include_full_names.update(full_name for full_name in all_blueprints if regexp.match(full_name))
-
-        return {
-            full_name: bp
-            for full_name, bp in all_blueprints.items()
-            if full_name in include_full_names and full_name not in exclude_full_names
-        }
-
-    def get_placeholder(self, name: str) -> Union[bool, float, int, str]:
+    def get_placeholder(self, name: str) -> Union[bool, float, int, str, List[Union[bool, float, int, str]]]:
         if name not in self.placeholders:
             raise ValueError(f"Unknown placeholder [{name}]")
 
@@ -118,15 +78,7 @@ class SnowDDLConfig:
 
         self.blueprints[cls][str(policy_name)].references.append(ref)
 
-    def add_error(self, path: Path, e: Exception):
-        self.errors.append(
-            {
-                "path": path,
-                "error": e,
-            }
-        )
-
-    def add_placeholder(self, name: str, value: Union[bool, float, int, str]):
+    def add_placeholder(self, name: str, value: Union[bool, float, int, str, List[Union[bool, float, int, str]]]):
         self.placeholders[name] = value
 
     def add_permission_model(self, name: str, permission_model: PermissionModel):
@@ -134,15 +86,13 @@ class SnowDDLConfig:
 
     def _init_env_prefix(self, env_prefix):
         if env_prefix:
-            env_prefix = str(env_prefix).upper()
+            # Protects from code trying to use Config object and pass env prefix without separator at the end
+            if not env_prefix.endswith(("__", "_", "$")):
+                raise ValueError(
+                    f"Env prefix [{env_prefix}] in identifier must end with valid separator like [__] double underscore, [_] single underscore or [$] dollar"
+                )
 
-            if "__" in env_prefix:
-                raise ValueError(f"Env prefix [{env_prefix}] cannot contain [__] double underscore")
-
-            if env_prefix.endswith("_"):
-                raise ValueError(f"Env prefix [{env_prefix}] cannot end with [_] underscore")
-
-            return f"{env_prefix}__"
+            return env_prefix
 
         return ""
 

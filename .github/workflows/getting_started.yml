@@ -14,13 +14,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - env-prefix: PY38_BC
+          - env-prefix: PY38_LINUX
+            os: ubuntu-latest
             python-version: 3.8
 
-          - env-prefix: PY311_BC
-            python-version: 3.11
+          - env-prefix: PY312_LINUX
+            os: ubuntu-latest
+            python-version: 3.12
 
-    runs-on: ubuntu-latest
+          - env-prefix: PY312_WINDOWS
+            os: windows-latest
+            python-version: 3.12
+
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
 
     env:
@@ -30,6 +36,9 @@ jobs:
       SNOWFLAKE_ENV_PREFIX: ${{ matrix.env-prefix }}
 
     steps:
+      - name: Enable longpaths
+        run: git config --global core.longpaths true
+
       - name: Checkout repo
         uses: actions/checkout@v2
 

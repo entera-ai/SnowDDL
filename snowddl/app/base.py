@@ -8,15 +8,17 @@ from logging import getLogger, Formatter, StreamHandler
 from os import environ, getcwd
 from pathlib import Path
 from snowflake.connector import connect
+from string import ascii_uppercase, digits
 from time import perf_counter
 from traceback import TracebackException
 
 from snowddl.blueprint import Ident, ObjectType
 from snowddl.config import SnowDDLConfig
 from snowddl.engine import SnowDDLEngine
-from snowddl.parser import default_parse_sequence, PermissionModelParser, PlaceholderParser
+from snowddl.parser import default_parse_sequence, DirectoryScanner, PermissionModelParser, PlaceholderParser
 from snowddl.resolver import default_resolve_sequence, default_destroy_sequence
 from snowddl.settings import SnowDDLSettings
+from snowddl.validator import default_validate_sequence
 from snowddl.version import __version__
 
 
@@ -25,6 +27,7 @@ class BaseApp:
     application_version = __version__
 
     parse_sequence = default_parse_sequence
+    validate_sequence = default_validate_sequence
     resolve_sequence = default_resolve_sequence
     destroy_sequence = default_destroy_sequence
 
@@ -36,12 +39,10 @@ class BaseApp:
         self.logger = self.init_logger()
 
         with self.measure_elapsed_time("InitConfig"):
+            self.env_prefix = self.init_env_prefix()
             self.config_path = self.init_config_path()
             self.config = self.init_config()
             self.settings = self.init_settings()
-
-        with self.measure_elapsed_time("InitEngine"):
-            self.engine = self.init_engine()
 
     def init_arguments_parser(self):
         formatter = lambda prog: HelpFormatter(prog, max_help_position=36)
@@ -89,7 +90,7 @@ class BaseApp:
             "-r",
             help="Snowflake active role (default: SNOWFLAKE_ROLE env variable)",
             metavar="ROLE",
-            default=environ.get("SNOWFlAKE_ROLE"),
+            default=environ.get("SNOWFLAKE_ROLE"),
         )
         parser.add_argument(
             "-w",
@@ -101,7 +102,7 @@ class BaseApp:
         # Options
         parser.add_argument(
             "--authenticator",
-            help="Authenticator: 'snowflake' or 'externalbrowser' (to use any IdP and a web browser) (default: SNOWFLAKE_AUTHENTICATOR env variable or 'snowflake')",
+            help="Authenticator: 'snowflake', 'externalbrowser', 'oauth_snowpark` (default: SNOWFLAKE_AUTHENTICATOR env variable or 'snowflake')",
             default=environ.get("SNOWFLAKE_AUTHENTICATOR", "snowflake"),
         )
         parser.add_argument(
@@ -113,6 +114,12 @@ class BaseApp:
             "--env-prefix",
             help="Env prefix added to global object names, used to separate environments (e.g. DEV, PROD)",
             default=environ.get("SNOWFLAKE_ENV_PREFIX"),
+        )
+        parser.add_argument(
+            "--env-prefix-separator",
+            help="Custom separator for Env prefix (supported values are: '__', '_', '$')",
+            choices=["__", "_", "$"],
+            default=environ.get("SNOWFLAKE_ENV_PREFIX_SEPARATOR", "__"),
         )
         parser.add_argument(
             "--env-admin-role",
@@ -132,8 +139,17 @@ class BaseApp:
         parser.add_argument(
             "--log-level", help="Log level (possible values: DEBUG, INFO, WARNING; default: INFO)", default="INFO"
         )
-        parser.add_argument("--show-sql", help="Show executed DDL queries", default=False, action="store_true")
-        parser.add_argument("--show-timers", help="Show debug timers", default=False, action="store_true")
+        # fmt: off
+        parser.add_argument(
+            "--show-sql", help="Show executed DDL queries", default=False, action="store_true"
+        )
+        parser.add_argument(
+            "--show-timers", help="Show debug timers", default=False, action="store_true"
+        )
+        # fmt: on
+        parser.add_argument(
+            "--show-unused-files", help="Show warnings for unused config files", default=False, action="store_true"
+        )
 
         # Placeholders
         parser.add_argument(
@@ -179,6 +195,12 @@ class BaseApp:
         parser.add_argument(
             "--apply-aggregation-policy",
             help="Additionally apply changes to AGGREGATION POLICIES",
+            default=False,
+            action="store_true",
+        )
+        parser.add_argument(
+            "--apply-authentication-policy",
+            help="Additionally apply changes to AUTHENTICATION POLICIES",
             default=False,
             action="store_true",
         )
@@ -255,6 +277,7 @@ class BaseApp:
         subparsers.add_parser(
             "destroy", help="Drop objects with specified --env-prefix, use it to reset dev and test environments"
         )
+        subparsers.add_parser("validate", help="Validate config only, do not connect to Snowflake")
 
         return parser
 
@@ -274,8 +297,12 @@ class BaseApp:
         elif args["authenticator"] == "externalbrowser":
             if not args["a"] or not args["u"]:
                 return False
+        elif args["authenticator"] == "oauth_snowpark":
+            if not args["a"]:
+                return False
         elif args["authenticator"] is not None:
             return False
+
         return True
 
     def init_logger(self):
@@ -292,6 +319,31 @@ class BaseApp:
 
         return logger
 
+    def init_env_prefix(self):
+        env_prefix_value = self.args.get("env_prefix")
+        env_prefix_separator = self.args.get("env_prefix_separator")
+
+        allowed_env_prefix_value_chars = set(ascii_uppercase + digits + "_")
+
+        if env_prefix_value:
+            env_prefix_value = str(env_prefix_value).upper()
+
+            for char in env_prefix_value:
+                if char not in allowed_env_prefix_value_chars:
+                    raise ValueError(
+                        f"Character [{char}] is not allowed in env prefix [{env_prefix_value}], only ASCII letters, digits and single underscores are accepted"
+                    )
+
+            if env_prefix_separator in env_prefix_value:
+                raise ValueError(f"Env prefix [{env_prefix_value}] cannot contain env prefix separator [{env_prefix_separator}]")
+
+            if env_prefix_value.endswith("_"):
+                raise ValueError(f"Env prefix [{env_prefix_value}] cannot end with [_] underscore")
+
+            return f"{env_prefix_value}{env_prefix_separator}"
+
+        return ""
+
     def init_config_path(self):
         config_path = Path(self.args["c"])
 
@@ -307,34 +359,40 @@ class BaseApp:
         return config_path.resolve()
 
     def init_config(self):
-        config = SnowDDLConfig(self.args.get("env_prefix"))
+        config = SnowDDLConfig(self.env_prefix)
+        scanner = DirectoryScanner(self.config_path)
+
+        parser_error_count = 0
+        validator_error_count = 0
 
         # Placeholders
         placeholder_path = self.get_placeholder_path()
         placeholder_values = self.get_placeholder_values()
 
-        parser = PlaceholderParser(config, self.config_path)
+        parser = PlaceholderParser(config, scanner)
         parser.load_placeholders(placeholder_path, placeholder_values, self.args)
 
-        if config.errors:
-            self.output_config_errors(config)
+        if parser.errors:
+            self.logger.error(f"Execution halted due to [{len(parser.errors)}] error(s) in placeholders parser")
             exit(1)
 
         # Permission models
-        parser = PermissionModelParser(config, self.config_path)
+        parser = PermissionModelParser(config, scanner)
         parser.load_permission_models()
 
-        if config.errors:
-            self.output_config_errors(config)
+        if parser.errors:
+            self.logger.error(f"Execution halted due to [{len(parser.errors)}] error(s) in permission models parser")
             exit(1)
 
-        # Blueprints
+        # All blueprints
         for parser_cls in self.parse_sequence:
-            parser = parser_cls(config, self.config_path)
+            parser = parser_cls(config, scanner)
             parser.load_blueprints()
 
-        if config.errors:
-            self.output_config_errors(config)
+            parser_error_count += len(parser.errors)
+
+        if parser_error_count:
+            self.logger.error(f"Execution halted due to [{parser_error_count}] error(s) in config parsers")
             exit(1)
 
         # Custom programmatically generated blueprints and config adjustments
@@ -347,11 +405,23 @@ class BaseApp:
 
                 module.handler(config)
             except Exception as e:
-                config.add_error(module_path, e)
+                self.logger.warning(f"[{module_path}]: {''.join(TracebackException.from_exception(e).format())}")
+                self.logger.error("Execution halted due to error in programmatic config")
+                exit(1)
 
-        if config.errors:
-            self.output_config_errors(config)
+        # Run validators after all parsers and programmatic configs
+        for validator_cls in self.validate_sequence:
+            validator = validator_cls(config)
+            validator.validate()
+
+            validator_error_count += len(validator.errors)
+
+        if validator_error_count:
+            self.logger.error(f"Execution halted due to [{validator_error_count}] error(s) in config validators")
             exit(1)
+
+        if self.args.get("show_unused_files"):
+            self.output_unused_file_warnings(scanner.get_unused_file_paths())
 
         return config
 
@@ -370,6 +440,7 @@ class BaseApp:
             if self.args.get("apply_all_policy"):
                 settings.execute_account_level_policy = True
                 settings.execute_aggregation_policy = True
+                settings.execute_authentication_policy = True
                 settings.execute_masking_policy = True
                 settings.execute_projection_policy = True
                 settings.execute_row_access_policy = True
@@ -380,6 +451,9 @@ class BaseApp:
 
             if self.args.get("apply_aggregation_policy"):
                 settings.execute_aggregation_policy = True
+
+            if self.args.get("apply_authentication_policy"):
+                settings.execute_authentication_policy = True
 
             if self.args.get("apply_masking_policy"):
                 settings.execute_masking_policy = True
@@ -447,8 +521,11 @@ class BaseApp:
 
         return settings
 
-    def init_engine(self):
-        return SnowDDLEngine(self.get_connection(), self.config, self.settings)
+    def get_engine(self):
+        with self.measure_elapsed_time("GetEngine"):
+            engine = SnowDDLEngine(self.get_connection(), self.config, self.settings)
+
+        return engine
 
     def get_connection(self):
         options = {
@@ -485,8 +562,24 @@ class BaseApp:
                 options["password"] = self.args["p"]
         elif self.args.get("authenticator") == "externalbrowser":
             options["authenticator"] = "externalbrowser"
+        elif self.args.get("authenticator") == "oauth_snowpark":
+            options["authenticator"] = "oauth"
+            token_path = Path("/snowflake/session/token")
+
+            if "SNOWFLAKE_OAUTH_TOKEN" in environ:
+                options["token"] = environ["SNOWFLAKE_OAUTH_TOKEN"]
+            elif token_path.is_file():
+                options["token"] = token_path.read_text("utf-8")
+            else:
+                raise ValueError("Failed to obtain token for 'oauth_snowpark' authenticator")
+
+            if "SNOWFLAKE_HOST" in environ:
+                options["host"] = environ["SNOWFLAKE_HOST"]
+            else:
+                raise ValueError("Failed to obtain host for 'oauth_snowpark' authenticator")
+
         else:
-            raise ValueError("Only 'snowflake' and 'externalbrowser' authenticators are supported")
+            raise ValueError("Only 'snowflake', 'externalbrowser' and 'oauth_snowpark' authenticators are supported")
 
         if self.args.get("query_tag"):
             options["session_parameters"] = {
@@ -496,10 +589,13 @@ class BaseApp:
         return connect(**options)
 
     def execute(self):
-        error_count = 0
+        if self.args.get("action") == "validate":
+            return
 
-        with self.engine:
-            self.output_engine_context()
+        total_error_count = 0
+
+        with self.get_engine() as engine:
+            self.output_engine_context(engine)
 
             if self.args.get("action") == "destroy":
                 if not self.args.get("env_prefix") and not self.args.get("destroy_without_prefix"):
@@ -507,53 +603,54 @@ class BaseApp:
 
                 for resolver_cls in self.destroy_sequence:
                     with self.measure_elapsed_time(resolver_cls.__name__):
-                        resolver = resolver_cls(self.engine)
+                        resolver = resolver_cls(engine)
                         resolver.destroy()
 
-                    error_count += len(resolver.errors)
+                    total_error_count += len(resolver.errors)
 
-                self.engine.context.destroy_role_with_prefix()
+                engine.context.destroy_role_with_prefix()
             else:
                 for resolver_cls in self.resolve_sequence:
                     with self.measure_elapsed_time(resolver_cls.__name__):
-                        resolver = resolver_cls(self.engine)
+                        resolver = resolver_cls(engine)
                         resolver.resolve()
 
-                    error_count += len(resolver.errors)
+                    total_error_count += len(resolver.errors)
 
-            self.engine.connection.close()
-            self.output_engine_stats()
-            self.output_engine_warnings()
+            engine.connection.close()
+
+            self.output_engine_stats(engine)
+            self.output_engine_warnings(engine)
 
             if self.args.get("show_timers"):
                 self.output_app_timers()
 
             if self.args.get("show_sql"):
-                self.output_executed_ddl()
+                self.output_executed_ddl(engine)
 
-            self.output_suggested_ddl()
+            self.output_suggested_ddl(engine)
 
-            if error_count > 0:
+            if total_error_count > 0:
                 exit(8)
 
-    def output_engine_context(self):
+    def output_engine_context(self, engine: SnowDDLEngine):
         roles = []
 
-        if self.engine.context.is_account_admin:
+        if engine.context.is_account_admin:
             roles.append("ACCOUNTADMIN")
 
-        if self.engine.context.is_sys_admin:
+        if engine.context.is_sys_admin:
             roles.append("SYSADMIN")
 
-        if self.engine.context.is_security_admin:
+        if engine.context.is_security_admin:
             roles.append("SECURITYADMIN")
 
         self.logger.info(
-            f"Snowflake version = {self.engine.context.version} ({self.engine.context.edition.name}), SnowDDL version = {__version__}"
+            f"Snowflake version = {engine.context.version} ({engine.context.edition.name}), SnowDDL version = {__version__}"
         )
-        self.logger.info(f"Account = {self.engine.context.current_account}, Region = {self.engine.context.current_region}")
-        self.logger.info(f"Session = {self.engine.context.current_session}, User = {self.engine.context.current_user}")
-        self.logger.info(f"Role = {self.engine.context.current_role}, Warehouse = {self.engine.context.current_warehouse}")
+        self.logger.info(f"Account = {engine.context.current_account}, Region = {engine.context.current_region}")
+        self.logger.info(f"Session = {engine.context.current_session}, User = {engine.context.current_user}")
+        self.logger.info(f"Role = {engine.context.current_role}, Warehouse = {engine.context.current_warehouse}")
         self.logger.info(f"Roles in session = {','.join(roles)}")
         self.logger.info("---")
 
@@ -579,48 +676,55 @@ class BaseApp:
                 raise ValueError(f"Placeholder values [{self.args.get('placeholder_values')}] are not JSON encoded dict")
 
             for k, v in placeholder_values.items():
-                if not isinstance(v, (bool, float, int, str)):
+                if isinstance(v, list):
+                    for item in v:
+                        if not isinstance(item, (bool, float, int, str)):
+                            raise ValueError(
+                                f"Invalid type [{type(item).__name__}] of placeholder [{k.upper()}] item, supported types are: bool, float, int, str"
+                            )
+
+                elif not isinstance(v, (bool, float, int, str)):
                     raise ValueError(
-                        f"Invalid type [{type(v)}] of placeholder [{k.upper()}] value, supported types are: bool, float, int, str"
+                        f"Invalid type [{type(v).__name__}] of placeholder [{k.upper()}], supported types are scalars or lists of: bool, float, int, str"
                     )
 
             return placeholder_values
 
         return None
 
-    def output_config_errors(self, config):
-        for e in config.errors:
-            self.logger.warning(f"[{e['path']}]: {''.join(TracebackException.from_exception(e['error']).format())}")
-
-    def output_engine_stats(self):
+    def output_engine_stats(self, engine: SnowDDLEngine):
         self.logger.info(
-            f"Executed {len(self.engine.executed_ddl)} DDL queries, Suggested {len(self.engine.suggested_ddl)} DDL queries"
+            f"Executed {len(engine.executed_ddl)} DDL queries, Suggested {len(engine.suggested_ddl)} DDL queries"
         )
 
-    def output_engine_warnings(self):
-        for object_type, object_names in self.engine.intention_cache.invalid_name_warning.items():
+    def output_engine_warnings(self, engine: SnowDDLEngine):
+        for object_type, object_names in engine.intention_cache.invalid_name_warning.items():
             for name in object_names:
                 self.logger.warning(
                     f"Detected {object_type.name} with name [{name}] "
                     f"which does not conform to SnowDDL standards, please rename or drop it manually"
                 )
 
+    def output_unused_file_warnings(self, unused_file_paths):
+        for file_path in unused_file_paths.values():
+            self.logger.warning(f"Detected possibly unused config file [{file_path}]")
+
     def output_app_timers(self):
         for timer_name, timer_value in self.elapsed_timers.items():
             self.logger.info(f"Timer [{timer_name}] elapsed time is {timer_value:.3f}s")
 
-    def output_suggested_ddl(self):
-        if self.engine.suggested_ddl:
+    def output_suggested_ddl(self, engine: SnowDDLEngine):
+        if engine.suggested_ddl:
             print("--- Suggested DDL ---\n")
 
-        for sql in self.engine.suggested_ddl:
+        for sql in engine.suggested_ddl:
             print(f"{sql};\n")
 
-    def output_executed_ddl(self):
-        if self.engine.executed_ddl:
+    def output_executed_ddl(self, engine: SnowDDLEngine):
+        if engine.executed_ddl:
             print("--- Executed DDL ---\n")
 
-        for sql in self.engine.executed_ddl:
+        for sql in engine.executed_ddl:
             print(f"{sql};\n")
 
     @contextmanager

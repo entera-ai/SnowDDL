@@ -16,6 +16,11 @@ class AggregationPolicyReference(AbstractPolicyReference):
     columns: List[Ident]
 
 
+class AuthenticationPolicyReference(AbstractPolicyReference):
+    object_type: ObjectType
+    object_name: Optional[AbstractIdent] = None
+
+
 class ForeignKeyReference(BaseModelWithConfig):
     columns: List[Ident]
     ref_table_name: SchemaObjectIdent
@@ -35,7 +40,7 @@ class MaskingPolicyReference(AbstractPolicyReference):
 
 class NetworkPolicyReference(AbstractPolicyReference):
     object_type: ObjectType
-    object_name: Optional[AbstractIdent]
+    object_name: Optional[AbstractIdent] = None
 
 
 class ProjectionPolicyReference(AbstractPolicyReference):

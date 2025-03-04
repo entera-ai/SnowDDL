@@ -1,13 +1,18 @@
+from functools import partial
+
 from snowddl.blueprint import (
     UserBlueprint,
     AccountObjectIdent,
+    AuthenticationPolicyBlueprint,
+    AuthenticationPolicyReference,
     NetworkPolicyBlueprint,
     NetworkPolicyReference,
     ObjectType,
+    SchemaObjectIdent,
     build_role_ident,
     build_default_namespace_ident,
 )
-from snowddl.parser.abc_parser import AbstractParser, ParsedFile
+from snowddl.parser.abc_parser import AbstractParser
 from snowddl.parser.business_role import business_role_json_schema
 
 
@@ -68,6 +73,9 @@ user_json_schema = {
             "comment": {
                 "type": "string"
             },
+            "authentication_policy": {
+                "type": "string",
+            },
             "network_policy": {
                 "type": "string",
             },
@@ -80,79 +88,95 @@ user_json_schema = {
 
 class UserParser(AbstractParser):
     def load_blueprints(self):
-        self.parse_single_file(self.base_path / "user.yaml", user_json_schema, self.process_user)
+        default_wh_map = self.get_default_warehouse_map()
 
-    def process_user(self, f: ParsedFile):
-        default_warehouse_map = self.get_default_warehouse_map()
+        self.parse_multi_entity_file("user", user_json_schema, partial(self.process_user, default_wh_map=default_wh_map))
 
-        for user_name, user in f.params.items():
-            business_roles = []
-            default_warehouse = user.get("default_warehouse")
+    def process_user(self, user_name, user_params, default_wh_map):
+        business_roles = []
+        default_warehouse = user_params.get("default_warehouse")
 
-            for business_role_name in user.get("business_roles", []):
-                business_roles.append(build_role_ident(self.env_prefix, business_role_name, self.config.BUSINESS_ROLE_SUFFIX))
+        for business_role_name in user_params.get("business_roles", []):
+            business_roles.append(build_role_ident(self.env_prefix, business_role_name, self.config.BUSINESS_ROLE_SUFFIX))
 
-                if default_warehouse is None:
-                    default_warehouse = default_warehouse_map.get(business_role_name)
+            if default_warehouse is None:
+                default_warehouse = default_wh_map.get(business_role_name)
 
-            full_user_name = AccountObjectIdent(self.env_prefix, user_name)
+        full_user_name = AccountObjectIdent(self.env_prefix, user_name)
 
-            if user.get("login_name"):
-                # Login name is string, not identifier (!), special characters like '@#!' are permitted
-                # But it still requires env_prefix due to unique constraint
-                login_name = f"{self.config.env_prefix}{user.get('login_name')}".upper()
-            else:
-                login_name = str(full_user_name)
+        if user_params.get("login_name"):
+            # Login name is string, not identifier (!), special characters like '@#!' are permitted
+            # But it still requires env_prefix due to unique constraint
+            login_name = f"{self.config.env_prefix}{user_params.get('login_name')}".upper()
+        else:
+            login_name = str(full_user_name)
 
-            if user.get("display_name"):
-                display_name = str(user.get("display_name")).upper()
-            else:
-                display_name = str(full_user_name)
+        if user_params.get("display_name"):
+            display_name = str(user_params.get("display_name")).upper()
+        else:
+            display_name = str(full_user_name)
 
-            bp = UserBlueprint(
-                full_name=full_user_name,
-                login_name=login_name,
-                display_name=display_name,
-                first_name=user.get("first_name"),
-                last_name=user.get("last_name"),
-                email=user.get("email"),
-                disabled=user.get("disabled", False),
-                password=user.get("password"),
-                rsa_public_key=user.get("rsa_public_key").replace(" ", "") if user.get("rsa_public_key") else None,
-                rsa_public_key_2=user.get("rsa_public_key_2").replace(" ", "") if user.get("rsa_public_key_2") else None,
-                type=str(user.get("type")).upper() if user.get("type") else None,
-                default_warehouse=AccountObjectIdent(self.env_prefix, default_warehouse) if default_warehouse else None,
-                default_namespace=build_default_namespace_ident(self.env_prefix, user.get("default_namespace"))
-                if user.get("default_namespace")
-                else None,
-                session_params=self.normalise_params_dict(user.get("session_params", {})),
-                business_roles=business_roles,
-                comment=user.get("comment"),
+        # fmt: off
+        bp = UserBlueprint(
+            full_name=full_user_name,
+            login_name=login_name,
+            display_name=display_name,
+            first_name=user_params.get("first_name"),
+            last_name=user_params.get("last_name"),
+            email=user_params.get("email"),
+            disabled=user_params.get("disabled", False),
+            password=user_params.get("password"),
+            rsa_public_key=user_params.get("rsa_public_key").replace(" ", "") if user_params.get("rsa_public_key") else None,
+            rsa_public_key_2=user_params.get("rsa_public_key_2").replace(" ", "") if user_params.get("rsa_public_key_2") else None,
+            type=str(user_params.get("type")).upper() if user_params.get("type") else None,
+            default_warehouse=AccountObjectIdent(self.env_prefix, default_warehouse) if default_warehouse else None,
+            default_namespace=build_default_namespace_ident(self.env_prefix, user_params.get("default_namespace")) if user_params.get("default_namespace") else None,
+            session_params=self.normalise_params_dict(user_params.get("session_params", {})),
+            business_roles=business_roles,
+            comment=user_params.get("comment"),
+        )
+        # fmt: on
+
+        self.config.add_blueprint(bp)
+
+        # Authentication policy
+        if user_params.get("authentication_policy"):
+            policy_name_parts = user_params.get("authentication_policy").split(".")
+
+            if len(policy_name_parts) != 3:
+                raise ValueError(
+                    f"Authentication policy [{user_params.get('authentication_policy')}] should use fully-qualified identifier <database>.<schema>.<name> for user [{full_user_name}]"
+                )
+
+            policy_name = SchemaObjectIdent(self.env_prefix, *policy_name_parts)
+
+            ref = AuthenticationPolicyReference(
+                object_type=ObjectType.USER,
+                object_name=full_user_name,
             )
 
-            self.validate_user_type_properties(bp)
-            self.config.add_blueprint(bp)
+            self.config.add_policy_reference(AuthenticationPolicyBlueprint, policy_name, ref)
 
-            # Network policy
-            if user.get("network_policy"):
-                policy_name = AccountObjectIdent(self.env_prefix, user.get("network_policy"))
+        # Network policy
+        if user_params.get("network_policy"):
+            policy_name = AccountObjectIdent(self.env_prefix, user_params.get("network_policy"))
 
-                ref = NetworkPolicyReference(
-                    object_type=ObjectType.USER,
-                    object_name=full_user_name,
-                )
+            ref = NetworkPolicyReference(
+                object_type=ObjectType.USER,
+                object_name=full_user_name,
+            )
 
-                self.config.add_policy_reference(NetworkPolicyBlueprint, policy_name, ref)
+            self.config.add_policy_reference(NetworkPolicyBlueprint, policy_name, ref)
 
-            if "NETWORK_POLICY" in bp.session_params:
-                raise ValueError(
-                    "NETWORK_POLICY in session_params of USER is no longer supported. Please use dedicated [network_policy] parameter instead. Read more: https://docs.snowddl.com/breaking-changes-log/0.33.0-october-2024"
-                )
+        if "NETWORK_POLICY" in bp.session_params:
+            raise ValueError(
+                "NETWORK_POLICY in session_params of USER is no longer supported. Please use dedicated [network_policy] parameter instead. Read more: https://docs.snowddl.com/breaking-changes-log/0.33.0-october-2024"
+            )
 
     def get_default_warehouse_map(self):
         default_warehouse_map = {}
 
-        business_role_config = self.parse_single_file(self.base_path / "business_role.yaml", business_role_json_schema)
+        business_role_config = self.parse_single_entity_file("business_role", business_role_json_schema)
 
         for business_role_name, business_role in business_role_config.items():
             if "warehouse_usage" not in business_role:
@@ -161,15 +185,3 @@ class UserParser(AbstractParser):
             default_warehouse_map[business_role_name] = business_role["warehouse_usage"][0]
 
         return default_warehouse_map
-
-    def validate_user_type_properties(self, bp: UserBlueprint):
-        if bp.type in ("SERVICE", "LEGACY_SERVICE"):
-            if bp.first_name:
-                raise ValueError(f"Property [FIRST_NAME] is not allowed for user [{bp.full_name}] with type [{bp.type}]")
-
-            if bp.last_name:
-                raise ValueError(f"Property [LAST_NAME] is not allowed for user [{bp.full_name}] with type [{bp.type}]")
-
-        if bp.type == "SERVICE":
-            if bp.password:
-                raise ValueError(f"Property [PASSWORD] is not allowed for user [{bp.full_name}] with type [{bp.type}]")

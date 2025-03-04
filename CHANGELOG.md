@@ -1,5 +1,167 @@
 # Changelog
 
+## [0.44.2] - 2025-03-03
+
+- Added support for serverless alerts. Parameter `WAREHOUSE` for object type `ALERT` is now optional.
+- Fixed tests for object type `USER` related to recent changes in output of `SHOW USERS` command.
+
+## [0.44.1] - 2025-02-13
+
+- Added workaround for `AWS_SNS_TOPIC` DIRECTORY parameter not being present in output of `DESC STAGE` command. It should be possible to use this parameter without triggering `ValueError`.
+
+## [0.44.0] - 2025-02-12
+
+- Reworked `OUTBOUND_SHARE` resolver. Now it supports more than 3 accounts per share. `SET ACCOUNTS` command was replaced with `ADD ACCOUNTS` and `REMOVE ACCOUNTS`, since `SET ACCOUNTS` no longer supports `SHARE_RESTRICTIONS` parameter.
+
+## [0.43.0] - 2025-01-31
+
+- Introduced action `validate`. It prepares and validates config, but stops right before connecting to Snowflake. It might be helpful for automated checks and git hooks.
+- Removed `self.engine` from application classes. Now engine is created and closed only during `execute()` call, but not during `__init__`.
+
+This change should not have any impact, unless you have custom application classes. In this case replace `with self.engine` call with `with self.get_engine()`. Some output functions now also accept `engine` argument instead of relying on `self.engine`.
+
+## [0.42.1] - 2025-01-30
+
+- Prevented SnowDDL from trying to change `OWNERSHIP` of Notebook object. This change is explicitly [not supported](https://docs.snowflake.com/en/user-guide/ui-snowsight/notebooks-limitations) by Snowflake.
+
+## [0.42.0] - 2025-01-29
+
+- Introduced logic to `.lstrip(" \n\r\t").rstrip(" \n\r\t;")` from object config parameters containing SQL snippets:
+  - AGGREGATION_POLICY: `body`;
+  - DYNAMIC_TABLE: `text`;
+  - MASKING_POLICY: `body`;
+  - MATERIALIZED_VIEW: `text`;
+  - PROJECTION_POLICY: `body`;
+  - ROW_ACCESS_POLICY: `body`;
+  - TASK: `body`;
+  - VIEW: `text`;
+
+This change should help to prevent issues with these characters causing SnowDDL to re-create object constantly. Affected objects might be re-created once after the update.
+
+FUNCTION and PROCEDURE are not affected by this change, since their bodies may contain code which is not SQL.
+
+## [0.41.0] - 2025-01-26
+
+- Changed naming for some roles automatically created by SnowDDL to prevent collisions with native Snowflake entities, specifically `DATABASE ROLES`:
+  - `DatabaseRole` -> `DatabaseAccessRole`
+  - `SchemaRole` -> `SchemaAccessRole`
+  - `ShareRole` -> `ShareAccessRole`
+  - `WarehouseRole` -> `WarehouseAccessRole`
+
+This change affects SnowDDL internals only. Config format and business logic remains the same. Names of roles in Snowflake account remain the same. Only names of files, classes and constants were changed.
+
+## [0.40.0] - 2025-01-08
+
+- `VIEW` object type is now supported as a valid target for `STREAM`. Streams are resolved AFTER views.
+- Added `change_tracking` parameter for views.
+- Added validation of `change_tracking=True` for `EVENT_TABLE`, `TABLE` and `VIEW` targeted by `STREAM`.
+- Reworked `STREAM` replace conditions. Now resolver should react to changes in `object_type` and `object_name` properly.
+- Stale streams will be suggested for replacement even if all other parameters are the same. It is especially important for streams on views.
+- Added "replace reasons" comments before `CREATE OR REPLACE STREAM` for better clarity. It is similar to "replace reasons" on tables.
+- Renamed technical object type `EXTERNAL_VOLUME` into `VOLUME`. It is necessary for grants to operate properly.
+- Added tests for streams.
+
+## [0.39.1] - 2025-01-06
+
+- Fixed error when `TableResolver` tries to run `DESCRIBE SEARCH OPTIMIZATION` on `TABLE` which does not exist yet.
+- Fixed error when `AuthenticationPolicyResolver` tries to run `POLICY_REFERENCES()` on `USER` which does not exist yet.
+
+These changes take effect mostly during `plan` action and should not have noticeable impact on `apply`.
+
+## [0.39.0] - 2025-01-01
+
+- Increased default number of workers from 8 to 32.
+- Introduced basic benchmark to estimate how number of workers impacts final performance.
+- Added dependency validations for DYNAMIC_TABLE, HYBRID_TABLE, TASK, VIEW.
+
+## [0.38.0] - 2024-12-17
+
+- Introduced initial implementation of `ICEBERG_TABLE` object type. Currently only unmanaged Iceberg tables are supported.
+- Added parameters `external_volume` and `catalog` for `SCHEMA` object type, required for Iceberg tables to work.
+- Split `run_test.sh` script into two scripts: `run_test_full.sh` and `run_test_lite.sh`. The Lite version does not run tests which require complicated setup for external resources. At this moment it skips Iceberg tables.
+- Added `iceberg_setup.sql` for tests, helps to prepare environment for Iceberg table tests.
+
+Managed Iceberg tables will be implemented if we see a sufficient interest from users.
+
+## [0.37.4] - 2024-12-06
+
+- Relaxed argument validation for `oauth_snowpark` authenticator.
+
+## [0.37.3] - 2024-12-06
+
+- Added `oauth_snowpark` authenticator to simplify running SnowDDL inside Snowpark containers.
+
+## [0.37.2] - 2024-12-05
+
+- Improved handling of new columns with default values during replace table.
+
+## [0.37.1] - 2024-12-05
+
+- Fixed issue with database role grants pointing to database with `schema_owner` ruleset.
+
+## [0.37.0] - 2024-12-04
+
+This is a major update to config parsing and validation, which introduces some breaking changes. [Read more about it](https://docs.snowddl.com/breaking-changes-log/0.37.0-december-2024).
+
+- Moved parsing errors from `SnowDDLConfig` class into individual `Parser` classes, now works similar to `Resolvers`.
+- Introduced a concept of `IdentPattern`. It is a special class used to define patterns to match object names in config.
+- Introduced a concept of `GrantPattern`. It is a special class used to define grants for objects defined by `IdentPattern`.
+- Significantly reworked `BusinessRoleBlueprint`, `TechnicalRoleBlueprint`, `DatabaseBlueprint`, `SchemaBlueprint`, `OutboundShareBlueprint`. Moved grant generation logic from parsers to resolvers. Programmatic config update is required.
+- Introduced concept of `Validators` running after all parsers and programmatic config to validate an entire config.
+- Moved some validations from existing parsers to validators.
+- Improved error handling while parsing config files with multiple entities. Now each entity is processed separately and may raise a separate exception.
+- Switched all calls of `information_schema.policy_references()` table function to `SNOWFLAKE` database. Other databases may not exist, especially during very first `plan` action.
+- Moved database role grants for shares from `global_roles` to `share_read` parameter. Currently, there are no more uses for database role grants, so thematically it makes sense.
+- Reworked `StageFileBlueprint` to operate using `Path` objects instead of strings. It helps to improve general compatibility with Windows OS.
+
+## [0.36.2] - 2024-11-28
+
+- Added `CORTEX_SEARCH_SERVICE` object types for grants.
+- Added skip logic for virtual columns when replacing table with CTAS.
+
+## [0.36.1] - 2024-11-25
+
+- Attempted to fix directory separator issues inside `DirectoryScanneer` on Windows.
+
+## [0.36.0] - 2024-11-23
+
+- Introduced support for both `.yml` and `.yaml` config file extensions. Previously it was only `.yaml`.
+- Implemented lists as possible placeholder values. Previously only scalar values were supported.
+- Changed default values for `FileFormat.format_options`, `User.session_params`, `Warehouse.warehouse_params` from `None` to `{}`. It should help to prevent errors when blueprints are created dynamically in code.
+- Removed `.grep()` calls and improved performance of config directory traversing.
+
+## [0.35.1] - 2024-11-11
+
+- Added skip for stage DIRECTORY property `DIRECTORY_NOTIFICATION_CHANNEL`. It is an informational property, should not be compared.
+
+## [0.35.0] - 2024-11-08
+
+- Added explicit notice when `CREATE OR REPLACE TABLE` is about to drop a column from table.
+- It is now possible to set `is_sandbox: false` on schema level when `is_sandbox: true` on database level.
+- Fixed ENV variable name `SNOWFLAKE_ROLE`.
+
+## [0.34.4] - 2024-11-03
+
+- Added missing conversion logic for `DatabaseBlueprint` when operating in SingleDB mode. It no longer prevents schemas from being dropped in this mode.
+
+## [0.34.3] - 2024-10-18
+
+- Added `ICEBERG_TABLE` object type to make it available for grants and permission models.
+
+## [0.34.2] - 2024-10-18
+
+- Added parameters `owner_database_read`, `owner_database_write` to `DATABASE` config. It only works if both current database and target database has permission model with `database_owner` ruleset.
+
+## [0.34.1] - 2024-10-14
+
+- Fixed issue with ACCOUNT-level policy references.
+
+## [0.34.0] - 2024-10-13
+
+- Introduced CLI option `--env-prefix-separator` which allows to choose separator for env prefix from one of three pre-defined variants: `__`, `_`, `$`. Default is `__`.
+- Implemented `AUTHENTICATION_POLICY` object type. It can be referenced from `ACCOUNT_POLICY` and `USER` configs.
+- Reworked `WAREHOUSE` resolver, implemented `resource_constraint` parameter for Snowpark-optimized warehouses.
+
 ## [0.33.0] - 2024-10-11
 
 This is a major update to policies, which introduces some breaking changes. [Read more about it](https://docs.snowddl.com/breaking-changes-log/0.33.0-october-2024).

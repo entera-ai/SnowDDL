@@ -89,9 +89,9 @@ class DynamicTableParser(AbstractParser):
 
         bp = DynamicTableBlueprint(
             full_name=SchemaObjectIdent(self.env_prefix, f.database, f.schema, f.name),
-            text=f.params["text"],
+            text=self.normalise_sql_text_param(f.params["text"]),
             columns=column_blueprints if column_blueprints else None,
-            target_lag=self.normalize_target_lag(f.params["target_lag"]),
+            target_lag=self.normalise_target_lag(f.params["target_lag"]),
             warehouse=AccountObjectIdent(self.env_prefix, f.params["warehouse"]),
             refresh_mode=f.params.get("refresh_mode").upper() if f.params.get("refresh_mode") else None,
             initialize=f.params.get("initialize").upper() if f.params.get("initialize") else None,
@@ -106,7 +106,7 @@ class DynamicTableParser(AbstractParser):
 
         self.config.add_blueprint(bp)
 
-    def normalize_target_lag(self, target_lag: str):
+    def normalise_target_lag(self, target_lag: str):
         if target_lag.upper() == "DOWNSTREAM":
             return "DOWNSTREAM"
 
