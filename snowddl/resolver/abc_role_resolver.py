@@ -5,6 +5,7 @@ from snowddl.blueprint import (
     AccountGrant,
     AccountObjectIdent,
     DatabaseBlueprint,
+    DatabaseIdent,
     DatabaseRoleIdent,
     FutureGrant,
     Ident,
@@ -469,3 +470,36 @@ class AbstractRoleResolver(AbstractResolver):
             on=ObjectType.INTEGRATION,
             name=integration_name,
         )
+
+    def gather_db_identifiers_for_schema_role_grants(self, schema_bp: SchemaBlueprint):
+        """
+        The copy_schema_role_grants_to_db_clones attribute of the DatabaseBlueprint class
+        allows for specifying a list of database clones which should inherit the privileges
+        granted to a particular schema role. For example, if the copy_schema_role_grants_to_db_clones
+        attribute for the ANALYTICS database is set to ["ANALYTICS_CLONE1", "ANALYTICS_CLONE2"],
+        then all default grants applied to it's schema roles also get duplexed to the specified
+        clones. For instance, if the ANALYTICS__<schema>__OWNER__S_ROLE has USAGE on ANALYTICS,
+        then it also gets USAGE on ANALYTICS_CLONE1 and ANALYTICS_CLONE2.
+
+        This method is a helper to gather the list of database identifiers to which schema role
+        grants should be applied in the get_blueprint_*_role() methods. This list will be a union
+        of the database identifier specified by the schema_bp argument, and the database identifiers
+        found in the copy_schema_role_grants_to_db_clones attribute for that schema's DatabaseBlueprint.
+        """
+        database_identifiers = []
+
+        source_db_name = schema_bp.full_name.database
+        source_db_identifier = DatabaseIdent(schema_bp.full_name.env_prefix, source_db_name)
+        database_identifiers.append(source_db_identifier)
+
+        source_db_blueprint = list(
+            self.config.get_blueprints_by_type_and_pattern(DatabaseBlueprint, IdentPattern(source_db_name)).values()
+        )[0]
+
+        cloned_database_identifiers = [
+            DatabaseIdent(source_db_blueprint.full_name.env_prefix, db_name)
+            for db_name in source_db_blueprint.copy_schema_role_grants_to_db_clones
+        ]
+        database_identifiers.extend(cloned_database_identifiers)
+
+        return database_identifiers

@@ -84,7 +84,26 @@ database_json_schema = {
         },
         "comment": {
             "type": "string"
-        }
+        },
+        "copy_schema_role_grants_to_db_clones": {
+            "type": "array",
+            "items": {
+                "type": "string"
+            }
+        },
+        "schema_roles": {
+            "anyOf": [
+                {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                {
+                    "type": "boolean"
+                }
+            ],
+        },
     },
     "additionalProperties": False
 }
@@ -114,6 +133,8 @@ class DatabaseParser(AbstractParser):
                 owner_account_grants=[AccountGrant(privilege=privilege) for privilege in database_params.get("owner_account_grants", [])],
                 owner_global_roles=[Ident(global_role_name) for global_role_name in database_params.get("owner_global_roles", [])],
                 comment=database_params.get("comment", None),
+                copy_schema_role_grants_to_db_clones=database_params.get("copy_schema_role_grants_to_db_clones", []),
+                schema_roles=database_params.get("schema_roles", []),
             )
             # fmt: on
 

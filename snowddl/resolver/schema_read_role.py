@@ -1,5 +1,6 @@
 from snowddl.blueprint import (
     DatabaseIdent,
+    SchemaIdent,
     FutureGrant,
     Grant,
     RoleBlueprint,
@@ -23,7 +24,17 @@ class SchemaReadRoleResolver(AbstractRoleResolver):
         for schema_bp in self.config.get_blueprints_by_type(SchemaBlueprint).values():
             schema_permission_model = self.config.get_permission_model(schema_bp.permission_model)
 
-            if schema_permission_model.ruleset.create_schema_read_role:
+            if schema_bp.schema_roles == False:
+                # don't generate any roles for this schema
+                continue
+
+            schema_bp.schema_roles = [role.lower() for role in schema_bp.schema_roles]
+            # generate some or all schema roles using permission model
+            # if schema_roles[list[str]] is non-empty, generate just those roles
+            # if schema roles is an empty list, generate all roles
+            if schema_permission_model.ruleset.create_schema_read_role and (
+                "read" in schema_bp.schema_roles or schema_bp.schema_roles == []
+            ):
                 blueprints.append(self.get_blueprint_read_role(schema_bp))
 
         return {str(bp.full_name): bp for bp in blueprints}
@@ -34,31 +45,33 @@ class SchemaReadRoleResolver(AbstractRoleResolver):
 
         schema_permission_model = self.config.get_permission_model(schema_bp.permission_model)
 
-        grants.append(
-            Grant(
-                privilege="USAGE",
-                on=ObjectType.DATABASE,
-                name=DatabaseIdent(schema_bp.full_name.env_prefix, schema_bp.full_name.database),
-            )
-        )
+        database_identifiers = self.gather_db_identifiers_for_schema_role_grants(schema_bp)
 
-        grants.append(
-            Grant(
-                privilege="USAGE",
-                on=ObjectType.SCHEMA,
-                name=schema_bp.full_name,
-            )
-        )
-
-        for model_future_grant in schema_permission_model.read_future_grants:
-            future_grants.append(
-                FutureGrant(
-                    privilege=model_future_grant.privilege,
-                    on_future=model_future_grant.on,
-                    in_parent=ObjectType.SCHEMA,
-                    name=schema_bp.full_name,
+        for database_identifier in database_identifiers:
+            grants.append(
+                Grant(
+                    privilege="USAGE",
+                    on=ObjectType.DATABASE,
+                    name=database_identifier,
                 )
             )
+            schema_identifier = SchemaIdent(schema_bp.full_name.env_prefix, database_identifier, schema_bp.full_name.schema)
+            grants.append(
+                Grant(
+                    privilege="USAGE",
+                    on=ObjectType.SCHEMA,
+                    name=schema_identifier,
+                )
+            )
+            for model_future_grant in schema_permission_model.read_future_grants:
+                future_grants.append(
+                    FutureGrant(
+                        privilege=model_future_grant.privilege,
+                        on_future=model_future_grant.on,
+                        in_parent=ObjectType.SCHEMA,
+                        name=schema_identifier,
+                    )
+                )
 
         bp = RoleBlueprint(
             full_name=build_role_ident(

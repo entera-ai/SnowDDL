@@ -1,11 +1,16 @@
+from typing import List, Dict, Union
+
 from snowddl.blueprint import (
     DatabaseIdent,
     FutureGrant,
     Grant,
     RoleBlueprint,
+    DatabaseBlueprint,
+    SchemaIdent,
     SchemaBlueprint,
     SchemaObjectIdent,
     build_role_ident,
+    IdentPattern,
 )
 from snowddl.resolver.abc_role_resolver import AbstractRoleResolver, ObjectType
 
@@ -23,7 +28,17 @@ class SchemaOwnerRoleResolver(AbstractRoleResolver):
         for schema_bp in self.config.get_blueprints_by_type(SchemaBlueprint).values():
             schema_permission_model = self.config.get_permission_model(schema_bp.permission_model)
 
-            if schema_permission_model.ruleset.create_schema_owner_role:
+            if schema_bp.schema_roles == False:
+                # don't generate any roles for this schema
+                continue
+
+            schema_bp.schema_roles = [role.lower() for role in schema_bp.schema_roles]
+            # generate some or all schema roles using permission model
+            # if schema_roles[list[str]] is non-empty, generate just those roles
+            # if schema roles is an empty list, generate all roles
+            if schema_permission_model.ruleset.create_schema_owner_role and (
+                "owner" in schema_bp.schema_roles or schema_bp.schema_roles == []
+            ):
                 blueprints.append(self.get_blueprint_owner_role(schema_bp))
 
         return {str(bp.full_name): bp for bp in blueprints}
@@ -35,50 +50,66 @@ class SchemaOwnerRoleResolver(AbstractRoleResolver):
 
         schema_permission_model = self.config.get_permission_model(schema_bp.permission_model)
 
-        grants.append(
-            Grant(
-                privilege="USAGE",
-                on=ObjectType.DATABASE,
-                name=DatabaseIdent(schema_bp.full_name.env_prefix, schema_bp.full_name.database),
-            )
-        )
+        database_identifiers = self.gather_db_identifiers_for_schema_role_grants(schema_bp)
 
-        grants.append(
-            Grant(
-                privilege="USAGE",
-                on=ObjectType.SCHEMA,
-                name=schema_bp.full_name,
-            )
-        )
-
-        # Iceberg-related grants
-        if schema_bp.external_volume:
+        for database_identifier in database_identifiers:
             grants.append(
                 Grant(
                     privilege="USAGE",
-                    on=ObjectType.VOLUME,
-                    name=schema_bp.external_volume,
+                    on=ObjectType.DATABASE,
+                    name=database_identifier,
                 )
             )
 
-        if schema_bp.catalog:
+            schema_identifier = SchemaIdent(schema_bp.full_name.env_prefix, database_identifier, schema_bp.full_name.schema)
+
             grants.append(
                 Grant(
                     privilege="USAGE",
-                    on=ObjectType.INTEGRATION,
-                    name=schema_bp.catalog,
-                )
-            )
-
-        # Create grants
-        for model_create_grant in schema_permission_model.owner_create_grants:
-            grants.append(
-                Grant(
-                    privilege=f"CREATE {model_create_grant.on.singular}",
                     on=ObjectType.SCHEMA,
-                    name=schema_bp.full_name,
+                    name=schema_identifier,
                 )
             )
+
+            # Iceberg-related grants
+            if schema_bp.external_volume:
+                grants.append(
+                    Grant(
+                        privilege="USAGE",
+                        on=ObjectType.VOLUME,
+                        name=schema_bp.external_volume,
+                    )
+                )
+
+            if schema_bp.catalog:
+                grants.append(
+                    Grant(
+                        privilege="USAGE",
+                        on=ObjectType.INTEGRATION,
+                        name=schema_bp.catalog,
+                    )
+                )
+
+            # Create grants
+            for model_create_grant in schema_permission_model.owner_create_grants:
+                grants.append(
+                    Grant(
+                        privilege=f"CREATE {model_create_grant.on.singular}",
+                        on=ObjectType.SCHEMA,
+                        name=schema_identifier,
+                    )
+                )
+
+            # Future grants on SCHEMA level
+            for model_future_grant in schema_permission_model.owner_future_grants:
+                future_grants.append(
+                    FutureGrant(
+                        privilege=model_future_grant.privilege,
+                        on_future=model_future_grant.on,
+                        in_parent=ObjectType.SCHEMA,
+                        name=schema_identifier,
+                    )
+                )
 
         # Owner-specific grants
         for database_name_pattern in schema_bp.owner_database_write:
@@ -108,7 +139,6 @@ class SchemaOwnerRoleResolver(AbstractRoleResolver):
         for global_role_name in schema_bp.owner_global_roles:
             grants.append(self.build_global_role_grant(global_role_name))
 
-        # Future grants on SCHEMA level
         for model_future_grant in schema_permission_model.owner_future_grants:
             future_grants.append(
                 FutureGrant(

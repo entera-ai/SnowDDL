@@ -45,6 +45,19 @@ schema_json_schema = {
                 "type": "string"
             }
         },
+        "schema_roles": {
+            "anyOf": [
+                {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                {
+                    "type": "boolean"
+                }
+            ],
+        },
         "owner_schema_read": {
             "type": "array",
             "items": {
@@ -111,7 +124,8 @@ class SchemaParser(AbstractParser):
                 combined_params = {
                     "is_transient": database_params.get("is_transient", False) or schema_params.get("is_transient", False),
                     "retention_time": schema_params.get("retention_time"),
-                    "is_sandbox": schema_params.get("is_sandbox", database_params.get("is_sandbox", False)),
+                    "is_sandbox": database_params.get("is_sandbox", False) or schema_params.get("is_sandbox", False),
+                    "schema_roles": schema_params.get("schema_roles") or database_params.get("schema_roles", []),
                 }
 
                 # fmt: off
@@ -132,6 +146,7 @@ class SchemaParser(AbstractParser):
                     owner_share_read=[build_share_read_ident(share_name) for share_name in schema_params.get("owner_share_read", [])],
                     owner_account_grants=[AccountGrant(privilege=privilege) for privilege in schema_params.get("owner_account_grants", [])],
                     owner_global_roles=[Ident(global_role_name) for global_role_name in schema_params.get("owner_global_roles", [])],
+                    schema_roles=combined_params.get("schema_roles", []),
                     comment=schema_params.get("comment", None),
                 )
                 # fmt: on
