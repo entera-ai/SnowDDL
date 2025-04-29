@@ -59,6 +59,13 @@ class ObjectType(Enum):
         "plural": "DATABASE ROLES",
     }
 
+    # Technical object type, used for GRANTs only
+    # There is no blueprint
+    DATASET = {
+        "singular": "DATASET",
+        "plural": "DATASETS",
+    }
+
     DYNAMIC_TABLE = {
         "singular": "DYNAMIC TABLE",
         "plural": "DYNAMIC TABLES",
@@ -219,6 +226,13 @@ class ObjectType(Enum):
         "plural": "SECRETS",
         "is_future_grant_supported": True,
         "blueprint_cls": "SecretBlueprint",
+    }
+
+    SEMANTIC_VIEW = {
+        "singular": "SEMANTIC VIEW",
+        "plural": "SEMANTIC VIEWS",
+        "is_future_grant_supported": True,
+        "blueprint_cls": "SemanticViewBlueprint",
     }
 
     SEQUENCE = {

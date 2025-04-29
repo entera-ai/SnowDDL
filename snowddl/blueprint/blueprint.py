@@ -40,6 +40,7 @@ from .reference import (
     RowAccessPolicyReference,
     TagReference,
 )
+from .semantic_view import SemanticViewExpression, SemanticViewRelationship, SemanticViewTable
 from .stage import StageWithPath
 from ..model import BaseModelWithConfig
 
@@ -114,6 +115,8 @@ class DatabaseBlueprint(AbstractBlueprint):
     retention_time: Optional[int] = None
     owner_database_write: List[IdentPattern] = []
     owner_database_read: List[IdentPattern] = []
+    owner_schema_write: List[IdentPattern] = []
+    owner_schema_read: List[IdentPattern] = []
     owner_integration_usage: List[Ident] = []
     owner_share_read: List[Union[Ident, DatabaseRoleIdent]] = []
     owner_warehouse_usage: List[AccountObjectIdent] = []
@@ -199,6 +202,7 @@ class FunctionBlueprint(SchemaObjectBlueprint):
     arguments: List[ArgumentWithType]
     returns: Union[DataType, List[NameWithType]]
     is_secure: bool = False
+    is_aggregate: bool = False
     is_strict: bool = False
     is_immutable: bool = False
     is_memoizable: bool = False
@@ -255,8 +259,8 @@ class NetworkPolicyBlueprint(AbstractBlueprint):
 
 class NetworkRuleBlueprint(SchemaObjectBlueprint):
     type: str
-    value_list: List[str]
     mode: str
+    value_list: List[str] = []
 
 
 class OutboundShareBlueprint(AbstractBlueprint):
@@ -351,6 +355,15 @@ class SecretBlueprint(SchemaObjectBlueprint):
     username: Optional[str] = None
     password: Optional[str] = None
     secret_string: Optional[str] = None
+    algorithm: Optional[str] = None
+
+
+class SemanticViewBlueprint(SchemaObjectBlueprint):
+    tables: List[SemanticViewTable]
+    relationships: List[SemanticViewRelationship] = []
+    facts: List[SemanticViewExpression] = []
+    dimensions: List[SemanticViewExpression] = []
+    metrics: List[SemanticViewExpression] = []
 
 
 class SequenceBlueprint(SchemaObjectBlueprint):
@@ -400,6 +413,7 @@ class TagBlueprint(SchemaObjectBlueprint):
 
 class TaskBlueprint(SchemaObjectBlueprint, DependsOnMixin):
     body: str
+    scheduling_mode: Optional[str] = None
     schedule: Optional[str] = None
     after: Optional[List[SchemaObjectIdent]] = None
     finalize: Optional[SchemaObjectIdent] = None
@@ -412,8 +426,13 @@ class TaskBlueprint(SchemaObjectBlueprint, DependsOnMixin):
     user_task_timeout_ms: Optional[int] = None
     suspend_task_after_num_failures: Optional[int] = None
     error_integration: Optional[Ident] = None
+    success_integration: Optional[Ident] = None
+    log_level: Optional[str] = None
     task_auto_retry_attempts: Optional[int] = None
     user_task_minimum_trigger_interval_in_seconds: Optional[int] = None
+    target_completion_interval: Optional[str] = None
+    serverless_task_min_statement_size: Optional[str] = None
+    serverless_task_max_statement_size: Optional[str] = None
 
 
 class TechnicalRoleBlueprint(AbstractBlueprint):

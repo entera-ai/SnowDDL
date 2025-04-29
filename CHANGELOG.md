@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.49.2] - 2025-04-23
+
+- Introduced explicit `object_type` to `source_type` mapping for `STREAM`. It should help to reduce naming inconsistency presented in output of `SHOW STREAMS` command.
+- Added `STREAM` tests targeting `EXTERNAL_TABLE` and `STAGE` (directory table).
+- Added workaround for Snowflake bug related to `SHOW STREAMS` command returning not fully qualified names for `STAGE` targets.
+
+## [0.49.1] - 2025-04-23
+
+- Added explicit `.rstrip(";")` call when reading `text` from `VIEW` and `MATERIALIZED_VIEW` metadata. Other object types should not be affected by trailing semicolon problem.
+- Fixed issue with lower-cased encryption type causing forced replace for `STAGE` objects.
+
+## [0.49.0] - 2025-04-23
+
+- Added initial implementation for `SEMANTIC_VIEW` object type.
+- Reworked grants checking mechanism for outbound shares. Existing grants created by external tools and matching grant patterns in config will not be dropped.
+- Reworked building of grant names. Now it tries to detect current env_prefix and put it into corresponding argument.
+- Adjusted destroy sequence. Moved outbound share above `DATABASE` in order to mitigate shares blocking database and role drops.
+- Bumped minimum Python version from 3.8 to 3.9.
+- Bumped maximum Python version in tests from 3.11 to 3.12.
+
+## [0.48.1] - 2025-04-16
+
+- Added explicit `.rstrip(";")` call when reading `text` from `DYNAMIC_TABLE` metadata. It should help to prevent re-creation of dynamic tables.
+
+## [0.48.0] - 2025-04-15
+
+- Added `FILE` data type.
+- Added `DATASET` object type. It is currently not managed by SnowDDL, but can be used for create and future grants in permission models.
+- Added parameter `is_aggregate` for `FUNCTION` object type. It works with Python user-defined aggregate functions.
+
+## [0.47.0] - 2025-04-09
+
+- All parameters are now required for authentication policy. Snowflake has changed defaults recently. Hardcoding defaults is no longer a viable strategy.
+- Added parameters `scheduling_mode`, `success_integration`, `log_level`, `target_completion_interval`, `serverless_task_min_statement_size`, `serverless_task_max_statement_size` for `TASK` object type.
+- Added test for `TASK` with multi-statement Snowflake script.
+
+## [0.46.0] - 2025-03-25
+
+- Parameter `value_list` for `NETWORK_RULE` is no longer required.
+- Added parameter `algorithm` for `SECRET`. Type `SYMMETRIC_KEY` is now supported.
+
+## [0.45.0] - 2025-03-24
+
+- Separated `DatabaseAccessRoleResolver` into `DatabaseOwnerRoleResolver`, `DatabaseReadRoleResolver`, `DatabaseWriteRoleResolver`.
+- Separated `SchemaAccessRoleResolver` into `SchemaOwnerRoleResolver`, `SchemaReadRoleResolver`, `SchemaWriteRoleResolver`.
+- Separated `WarehouseAccessRoleResolver` into `WarehouseMonitorRoleResolver`, `WarehouseUsageRoleResolver`.
+- Moved creation of database owner roles and schema owner roles after creation of read and write roles in execution sequence order.
+- Removed dependency checks from database owner roles and schema owner roles, no longer needed.
+- Added `owner_schema_read`, `owner_schema_write` parameters for `DATABASE` object type. It is now possible to grant individual schema access to database owners.
+- Removed permission model restrictions from `owner_database_read`, `owner_database_write` parameters of `DATABASE` object type. It is now possible to grant database access regardless of its permission model settings.
+
+This change aims to eliminate inconsistencies related to interactions between database roles and schema roles. It should help to simplify introduction of new role types in the future.
+
+## [0.44.4] - 2025-03-20
+
+- Added explicit validator preventing technical roles from using `ALL` privilege. Each individual privilege must be defined explicitly.
+
+## [0.44.3] - 2025-03-08
+
+- Enabled `client_store_temporary_credential` for authenticator `externalbrowser`.
+
 ## [0.44.2] - 2025-03-03
 
 - Added support for serverless alerts. Parameter `WAREHOUSE` for object type `ALERT` is now optional.

@@ -34,6 +34,9 @@ secret_json_schema = {
         "secret_string": {
             "type": "string"
         },
+        "algorithm": {
+            "type": "string"
+        },
         "comment": {
             "type": "string"
         },
@@ -46,9 +49,9 @@ secret_json_schema = {
 
 class SecretParser(AbstractParser):
     def load_blueprints(self):
-        self.parse_schema_object_files("secret", secret_json_schema, self.process_sequence)
+        self.parse_schema_object_files("secret", secret_json_schema, self.process_secret)
 
-    def process_sequence(self, f: ParsedFile):
+    def process_secret(self, f: ParsedFile):
         bp = SecretBlueprint(
             full_name=SchemaObjectIdent(self.env_prefix, f.database, f.schema, f.name),
             type=str(f.params["type"]).upper(),
@@ -59,6 +62,7 @@ class SecretParser(AbstractParser):
             username=f.params.get("username"),
             password=f.params.get("password"),
             secret_string=f.params.get("secret_string"),
+            algorithm=f.params.get("algorithm"),
             comment=f.params.get("comment"),
         )
 

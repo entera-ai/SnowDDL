@@ -8,7 +8,9 @@ from .alert import AlertResolver
 from .business_role import BusinessRoleResolver
 from .clone_table import CloneTableResolver
 from .database import DatabaseResolver
-from .database_access_role import DatabaseAccessRoleResolver
+from .database_owner_role import DatabaseOwnerRoleResolver
+from .database_read_role import DatabaseReadRoleResolver
+from .database_write_role import DatabaseWriteRoleResolver
 from .dynamic_table import DynamicTableResolver
 from .event_table import EventTableResolver
 from .external_access_integration import ExternalAccessIntegrationResolver
@@ -33,8 +35,11 @@ from .row_access_policy import RowAccessPolicyResolver
 from .sequence import SequenceResolver
 from .share_access_role import ShareAccessRoleResolver
 from .schema import SchemaResolver
-from .schema_access_role import SchemaAccessRoleResolver
+from .schema_owner_role import SchemaOwnerRoleResolver
+from .schema_read_role import SchemaReadRoleResolver
+from .schema_write_role import SchemaWriteRoleResolver
 from .secret import SecretResolver
+from .semantic_view import SemanticViewResolver
 from .stage import StageResolver
 from .stage_file import StageFileResolver
 from .stream import StreamResolver
@@ -46,19 +51,25 @@ from .unique_key import UniqueKeyResolver
 from .user import UserResolver
 from .user_role import UserRoleResolver
 from .warehouse import WarehouseResolver
-from .warehouse_access_role import WarehouseAccessRoleResolver
+from .warehouse_monitor_role import WarehouseMonitorRoleResolver
+from .warehouse_usage_role import WarehouseUsageRoleResolver
 
 
 default_resolve_sequence = [
     AccountParameterResolver,
     ResourceMonitorResolver,
     WarehouseResolver,
-    WarehouseAccessRoleResolver,
+    WarehouseMonitorRoleResolver,
+    WarehouseUsageRoleResolver,
     DatabaseResolver,
     SchemaResolver,
     ShareAccessRoleResolver,
-    DatabaseAccessRoleResolver,
-    SchemaAccessRoleResolver,
+    DatabaseReadRoleResolver,
+    DatabaseWriteRoleResolver,
+    SchemaReadRoleResolver,
+    SchemaWriteRoleResolver,
+    DatabaseOwnerRoleResolver,
+    SchemaOwnerRoleResolver,
     SecretResolver,
     NetworkRuleResolver,
     ExternalAccessIntegrationResolver,
@@ -81,6 +92,7 @@ default_resolve_sequence = [
     ForeignKeyResolver,
     MaterializedViewResolver,
     ViewResolver,
+    SemanticViewResolver,
     PipeResolver,
     StreamResolver,
     TaskResolver,
@@ -105,19 +117,24 @@ default_destroy_sequence = [
     AccountParameterResolver,
     ResourceMonitorResolver,
     WarehouseResolver,
-    WarehouseAccessRoleResolver,
+    WarehouseMonitorRoleResolver,
+    WarehouseUsageRoleResolver,
     # --
     NetworkPolicyResolver,
     AuthenticationPolicyResolver,
     ExternalAccessIntegrationResolver,
+    OutboundShareResolver,
     # --
     DatabaseResolver,
     SchemaResolver,
     ShareAccessRoleResolver,
-    DatabaseAccessRoleResolver,
-    SchemaAccessRoleResolver,
+    DatabaseReadRoleResolver,
+    DatabaseWriteRoleResolver,
+    SchemaReadRoleResolver,
+    SchemaWriteRoleResolver,
+    DatabaseOwnerRoleResolver,
+    SchemaOwnerRoleResolver,
     # --
-    OutboundShareResolver,
     TechnicalRoleResolver,
     BusinessRoleResolver,
     UserRoleResolver,
@@ -148,6 +165,7 @@ singledb_resolve_sequence = [
     ForeignKeyResolver,
     MaterializedViewResolver,
     ViewResolver,
+    SemanticViewResolver,
     PipeResolver,
     StreamResolver,
     TaskResolver,

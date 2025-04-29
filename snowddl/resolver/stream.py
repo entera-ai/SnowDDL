@@ -3,6 +3,14 @@ from snowddl.resolver.abc_schema_object_resolver import AbstractSchemaObjectReso
 
 
 class StreamResolver(AbstractSchemaObjectResolver):
+    object_type_to_source_type_map = {
+        ObjectType.EXTERNAL_TABLE: "External Table",
+        ObjectType.EVENT_TABLE: "Table",
+        ObjectType.STAGE: "Stage",
+        ObjectType.TABLE: "Table",
+        ObjectType.VIEW: "View",
+    }
+
     def get_object_type(self) -> ObjectType:
         return ObjectType.STREAM
 
@@ -22,8 +30,8 @@ class StreamResolver(AbstractSchemaObjectResolver):
                 "database": r["database_name"],
                 "schema": r["schema_name"],
                 "name": r["name"],
-                "object_type": r["source_type"],
-                "object_name": r["table_name"],
+                "source_type": r["source_type"],
+                "table_name": r["table_name"],
                 "type": r["type"],
                 "stale": r["stale"] == "true",
                 "mode": r["mode"],
@@ -45,19 +53,31 @@ class StreamResolver(AbstractSchemaObjectResolver):
         replace_reasons = []
 
         if row["stale"]:
-            replace_reasons.append(f"Stream is marked as stale")
+            replace_reasons.append("Stream is marked as stale")
 
-        if bp.object_type.singular_for_ref != row["object_type"].upper().replace(" ", "_"):
-            replace_reasons.append(f"Source object type [{str(bp.object_type.name)}] in config does not match source type [{row['object_type']}] in Snowflake")
+        if self.object_type_to_source_type_map.get(bp.object_type) != row["source_type"]:
+            replace_reasons.append(
+                f"Source object type [{str(bp.object_type.name)}] in config does not match source_type [{row['source_type']}] in Snowflake"
+            )
 
-        if bp.object_name != row["object_name"]:
-            replace_reasons.append(f"Source object name [{bp.object_name}] in config does not match source name [{row['object_name']}] in Snowflake")
+        if bp.object_name != row["table_name"]:
+            if bp.object_type == ObjectType.STAGE and bp.object_name.name == row["table_name"]:
+                # Snowflake bug: SHOW STREAMS may return not fully qualified name for stage
+                pass
+            else:
+                replace_reasons.append(
+                    f"Source object name [{bp.object_name}] in config does not match table_name [{row['table_name']}] in Snowflake"
+                )
 
         if bp.append_only != ("APPEND_ONLY" in row["mode"]):
-            replace_reasons.append(f"APPEND_ONLY={str(bp.append_only)} in config does not match mode [{row['mode']}] in Snowflake")
+            replace_reasons.append(
+                f"APPEND_ONLY={str(bp.append_only)} in config does not match mode [{row['mode']}] in Snowflake"
+            )
 
         if bp.insert_only != ("INSERT_ONLY" in row["mode"]):
-            replace_reasons.append(f"INSERT_ONLY={str(bp.insert_only)} in config does not match mode [{row['mode']}] in Snowflake")
+            replace_reasons.append(
+                f"INSERT_ONLY={str(bp.insert_only)} in config does not match mode [{row['mode']}] in Snowflake"
+            )
 
         if replace_reasons:
             query = self._build_create_stream_sql(bp, True)
