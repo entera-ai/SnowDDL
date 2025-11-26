@@ -102,8 +102,23 @@ class BaseApp:
         # Options
         parser.add_argument(
             "--authenticator",
-            help="Authenticator: 'snowflake', 'externalbrowser', 'oauth_snowpark` (default: SNOWFLAKE_AUTHENTICATOR env variable or 'snowflake')",
+            help="Authenticator: snowflake, externalbrowser, oauth, oauth_snowpark, workload_identity (default: SNOWFLAKE_AUTHENTICATOR env variable)",
             default=environ.get("SNOWFLAKE_AUTHENTICATOR", "snowflake"),
+        )
+        parser.add_argument(
+            "--oauth-token",
+            help="Oauth access token (default: SNOWFLAKE_OAUTH_TOKEN env variable)",
+            default=environ.get("SNOWFLAKE_OAUTH_TOKEN"),
+        )
+        parser.add_argument(
+            "--workload-identity-token",
+            help="Workload identity token (default: SNOWFLAKE_WORKLOAD_IDENTITY_TOKEN env variable)",
+            default=environ.get("SNOWFLAKE_WORKLOAD_IDENTITY_TOKEN"),
+        )
+        parser.add_argument(
+            "--workload-identity-provider",
+            help="Workload identity provider (default: SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER env variable)",
+            default=environ.get("SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER"),
         )
         parser.add_argument(
             "--passphrase",
@@ -237,6 +252,9 @@ class BaseApp:
             "--refresh-user-passwords", help="Additionally refresh passwords of users", default=False, action="store_true"
         )
         parser.add_argument(
+            "--refresh-workload-identity", help="Additionally refresh workload identites of users", default=False, action="store_true"
+        )
+        parser.add_argument(
             "--refresh-future-grants",
             help="Additionally refresh missing grants for existing objects derived from future grants",
             default=False,
@@ -258,9 +276,13 @@ class BaseApp:
         # Cloning
         parser.add_argument(
             "--clone-table",
-            help="Clone all tables from source databases (without env_prefix) to destination databases (with env_prefix)",
+            help="Clone all tables from source databases to destination databases (with env_prefix)",
             default=False,
             action="store_true",
+        )
+        parser.add_argument(
+            "--clone-source-env-prefix",
+            help="Clone from another environment with different env_prefix",
         )
 
         # Destroy without env prefix
@@ -297,8 +319,14 @@ class BaseApp:
         elif args["authenticator"] == "externalbrowser":
             if not args["a"] or not args["u"]:
                 return False
+        elif args["authenticator"] == "oauth":
+            if not args["a"] or not args["oauth_token"]:
+                return False
         elif args["authenticator"] == "oauth_snowpark":
             if not args["a"]:
+                return False
+        elif args["authenticator"] == "workload_identity":
+            if not args["a"] or not args["workload_identity_token"] or not args["workload_identity_provider"]:
                 return False
         elif args["authenticator"] is not None:
             return False
@@ -479,6 +507,9 @@ class BaseApp:
         if self.args.get("refresh_user_passwords"):
             settings.refresh_user_passwords = True
 
+        if self.args.get("refresh_workload_identity"):
+            settings.refresh_workload_identity = True
+
         if self.args.get("refresh_future_grants"):
             settings.refresh_future_grants = True
 
@@ -496,6 +527,12 @@ class BaseApp:
                 raise ValueError("Argument --clone-table requires argument --env-prefix")
 
             settings.clone_table = True
+
+        if self.args.get("clone_source_env_prefix"):
+            env_prefix = self.args.get("clone_source_env_prefix")
+            env_prefix_separator = self.args.get("env_prefix_separator")
+
+            settings.clone_source_env_prefix = f"{env_prefix}{env_prefix_separator}".upper()
 
         if self.args.get("env_admin_role"):
             settings.env_admin_role = Ident(self.args.get("env_admin_role"))
@@ -560,15 +597,21 @@ class BaseApp:
                 )
             else:
                 options["password"] = self.args["p"]
+
         elif self.args.get("authenticator") == "externalbrowser":
             options["authenticator"] = "externalbrowser"
             options["client_store_temporary_credential"] = True
+
+        elif self.args.get("authenticator") == "oauth":
+            options["authenticator"] = "oauth"
+            options["token"] = self.args["oauth_token"]
+
         elif self.args.get("authenticator") == "oauth_snowpark":
             options["authenticator"] = "oauth"
             token_path = Path("/snowflake/session/token")
 
-            if "SNOWFLAKE_OAUTH_TOKEN" in environ:
-                options["token"] = environ["SNOWFLAKE_OAUTH_TOKEN"]
+            if self.args["oauth_token"]:
+                options["token"] = self.args["oauth_token"]
             elif token_path.is_file():
                 options["token"] = token_path.read_text("utf-8")
             else:
@@ -579,8 +622,13 @@ class BaseApp:
             else:
                 raise ValueError("Failed to obtain host for 'oauth_snowpark' authenticator")
 
+        elif self.args.get("authenticator") == "workload_identity":
+            options["authenticator"] = "workload_identity"
+            options["workload_identity_provider"] = self.args["workload_identity_provider"]
+            options["token"] = self.args["workload_identity_token"]
+
         else:
-            raise ValueError("Only 'snowflake', 'externalbrowser' and 'oauth_snowpark' authenticators are supported")
+            raise ValueError("Only 'snowflake', 'externalbrowser', 'oauth', 'oauth_snowpark' and 'workload_identity' authenticators are supported")
 
         if self.args.get("query_tag"):
             options["session_parameters"] = {
@@ -635,16 +683,16 @@ class BaseApp:
                 exit(8)
 
     def output_engine_context(self, engine: SnowDDLEngine):
-        roles = []
+        system_roles = []
 
         if engine.context.is_account_admin:
-            roles.append("ACCOUNTADMIN")
+            system_roles.append("ACCOUNTADMIN")
 
         if engine.context.is_sys_admin:
-            roles.append("SYSADMIN")
+            system_roles.append("SYSADMIN")
 
         if engine.context.is_security_admin:
-            roles.append("SECURITYADMIN")
+            system_roles.append("SECURITYADMIN")
 
         self.logger.info(
             f"Snowflake version = {engine.context.version} ({engine.context.edition.name}), SnowDDL version = {__version__}"
@@ -652,7 +700,8 @@ class BaseApp:
         self.logger.info(f"Account = {engine.context.current_account}, Region = {engine.context.current_region}")
         self.logger.info(f"Session = {engine.context.current_session}, User = {engine.context.current_user}")
         self.logger.info(f"Role = {engine.context.current_role}, Warehouse = {engine.context.current_warehouse}")
-        self.logger.info(f"Roles in session = {','.join(roles)}")
+        self.logger.info(f"System roles = {','.join(system_roles)}")
+        self.logger.info(f"Active bundles = {','.join(engine.context.active_bundles)}")
         self.logger.info("---")
 
     def get_placeholder_path(self):
@@ -697,7 +746,7 @@ class BaseApp:
         self.logger.info(f"Executed {len(engine.executed_ddl)} DDL queries, Suggested {len(engine.suggested_ddl)} DDL queries")
 
     def output_engine_warnings(self, engine: SnowDDLEngine):
-        for object_type, object_names in engine.intention_cache.invalid_name_warning.items():
+        for object_type, object_names in engine.intention_cache.object_name_warning.items():
             for name in object_names:
                 self.logger.warning(
                     f"Detected {object_type.name} with name [{name}] "

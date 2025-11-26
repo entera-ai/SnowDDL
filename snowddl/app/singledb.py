@@ -99,8 +99,23 @@ class SingleDbApp(BaseApp):
         # Generic options
         parser.add_argument(
             "--authenticator",
-            help="Authenticator: 'snowflake', 'externalbrowser', 'oauth_snowpark' (default: SNOWFLAKE_AUTHENTICATOR env variable or 'snowflake')",
+            help="Authenticator: snowflake, externalbrowser, oauth, oauth_snowpark (default: SNOWFLAKE_AUTHENTICATOR env variable)",
             default=environ.get("SNOWFLAKE_AUTHENTICATOR", "snowflake"),
+        )
+        parser.add_argument(
+            "--oauth-token",
+            help="Oauth access token (default: SNOWFLAKE_OAUTH_TOKEN env variable)",
+            default=environ.get("SNOWFLAKE_OAUTH_TOKEN"),
+        )
+        parser.add_argument(
+            "--workload-identity-token",
+            help="Workload identity token (default: SNOWFLAKE_WORKLOAD_IDENTITY_TOKEN env variable)",
+            default=environ.get("SNOWFLAKE_WORKLOAD_IDENTITY_TOKEN"),
+        )
+        parser.add_argument(
+            "--workload-identity-provider",
+            help="Workload identity provider (default: SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER env variable)",
+            default=environ.get("SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER"),
         )
         parser.add_argument(
             "--passphrase",
@@ -215,6 +230,10 @@ class SingleDbApp(BaseApp):
             help="Clone all tables from source database (without env_prefix) to destination database (with env_prefix)",
             default=False,
             action="store_true",
+        )
+        parser.add_argument(
+            "--clone-source-env-prefix",
+            help="Clone from another environment with different env_prefix",
         )
 
         # Subparsers

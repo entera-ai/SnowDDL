@@ -8,6 +8,7 @@ from .alert import AlertParser
 from .authentication_policy import AuthenticationPolicyParser
 from .business_role import BusinessRoleParser
 from .database import DatabaseParser
+from .database_role import DatabaseRoleParser
 from .dynamic_table import DynamicTableParser
 from .event_table import EventTableParser
 from .external_access_integration import ExternalAccessIntegrationParser
@@ -33,6 +34,8 @@ from .schema import SchemaParser
 from .secret import SecretParser
 from .semantic_view import SemanticViewParser
 from .sequence import SequenceParser
+from .snapshot_policy import SnapshotPolicyParser
+from .snapshot_set import SnapshotSetParser
 from .stage import StageParser
 from .stream import StreamParser
 from .table import TableParser
@@ -54,6 +57,8 @@ default_parse_sequence = [
     RowAccessPolicyParser,
     ResourceMonitorParser,
     AccountPolicyParser,
+    SnapshotPolicyParser,
+    SnapshotSetParser,
     # --
     WarehouseParser,
     DatabaseParser,
@@ -81,6 +86,7 @@ default_parse_sequence = [
     TaskParser,
     AlertParser,
     # --
+    DatabaseRoleParser,
     OutboundShareParser,
     TechnicalRoleParser,
     BusinessRoleParser,
@@ -93,6 +99,8 @@ singledb_parse_sequence = [
     MaskingPolicyParser,
     ProjectionPolicyParser,
     RowAccessPolicyParser,
+    SnapshotPolicyParser,
+    SnapshotSetParser,
     # --
     DatabaseParser,
     SchemaParser,
@@ -117,4 +125,6 @@ singledb_parse_sequence = [
     StreamParser,
     TaskParser,
     AlertParser,
+    # --
+    DatabaseRoleParser,
 ]

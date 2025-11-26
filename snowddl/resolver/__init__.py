@@ -10,6 +10,7 @@ from .clone_table import CloneTableResolver
 from .database import DatabaseResolver
 from .database_owner_role import DatabaseOwnerRoleResolver
 from .database_read_role import DatabaseReadRoleResolver
+from .database_role import DatabaseRoleResolver
 from .database_write_role import DatabaseWriteRoleResolver
 from .dynamic_table import DynamicTableResolver
 from .event_table import EventTableResolver
@@ -40,6 +41,8 @@ from .schema_read_role import SchemaReadRoleResolver
 from .schema_write_role import SchemaWriteRoleResolver
 from .secret import SecretResolver
 from .semantic_view import SemanticViewResolver
+from .snapshot_policy import SnapshotPolicyResolver
+from .snapshot_set import SnapshotSetResolver
 from .stage import StageResolver
 from .stage_file import StageFileResolver
 from .stream import StreamResolver
@@ -98,6 +101,7 @@ default_resolve_sequence = [
     TaskResolver,
     AlertResolver,
     # --
+    DatabaseRoleResolver,
     OutboundShareResolver,
     TechnicalRoleResolver,
     BusinessRoleResolver,
@@ -110,6 +114,8 @@ default_resolve_sequence = [
     NetworkPolicyResolver,
     ProjectionPolicyResolver,
     RowAccessPolicyResolver,
+    SnapshotPolicyResolver,
+    SnapshotSetResolver,
 ]
 
 
@@ -135,6 +141,7 @@ default_destroy_sequence = [
     DatabaseOwnerRoleResolver,
     SchemaOwnerRoleResolver,
     # --
+    DatabaseRoleResolver,
     TechnicalRoleResolver,
     BusinessRoleResolver,
     UserRoleResolver,
@@ -171,13 +178,17 @@ singledb_resolve_sequence = [
     TaskResolver,
     AlertResolver,
     # --
+    DatabaseRoleResolver,
     AggregationPolicyResolver,
     MaskingPolicyResolver,
     ProjectionPolicyResolver,
     RowAccessPolicyResolver,
+    SnapshotPolicyResolver,
+    SnapshotSetResolver,
 ]
 
 
 singledb_destroy_sequence = [
     SchemaResolver,
+    DatabaseRoleResolver,
 ]

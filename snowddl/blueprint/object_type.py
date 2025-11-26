@@ -52,11 +52,10 @@ class ObjectType(Enum):
         "blueprint_cls": "DatabaseBlueprint",
     }
 
-    # Technical object type, used for GRANTs only
-    # There is no blueprint
     DATABASE_ROLE = {
         "singular": "DATABASE ROLE",
         "plural": "DATABASE ROLES",
+        "blueprint_cls": "DatabaseRoleBlueprint",
     }
 
     # Technical object type, used for GRANTs only
@@ -243,9 +242,21 @@ class ObjectType(Enum):
     }
 
     SHARE = {
-        "singluar": "SHARE",
+        "singular": "SHARE",
         "plural": "SHARES",
         "blueprint_cls": "OutboundShareBlueprint",
+    }
+
+    SNAPSHOT_POLICY = {
+        "singular": "SNAPSHOT POLICY",
+        "plural": "SNAPSHOT POLICIES",
+        "blueprint_cls": "SnapshotPolicyBlueprint",
+    }
+
+    SNAPSHOT_SET = {
+        "singular": "SNAPSHOT SET",
+        "plural": "SNAPSHOT SETS",
+        "blueprint_cls": "SnapshotSetBlueprint",
     }
 
     STAGE = {

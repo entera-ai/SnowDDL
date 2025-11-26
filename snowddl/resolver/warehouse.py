@@ -138,7 +138,7 @@ class WarehouseResolver(AbstractResolver):
         if bp.auto_suspend != row["auto_suspend"]:
             query.append_nl("AUTO_SUSPEND = {auto_suspend:d}", {"auto_suspend": bp.auto_suspend})
 
-        if bp.resource_constraint != row["resource_constraint"]:
+        if self._compare_resource_constraint(bp, row):
             query.append_nl("RESOURCE_CONSTRAINT = {resource_constraint}", {"resource_constraint": bp.resource_constraint})
 
         if self.engine.context.edition >= Edition.ENTERPRISE:
@@ -270,6 +270,16 @@ class WarehouseResolver(AbstractResolver):
 
     def _normalise_warehouse_size(self, size: str):
         return size.upper().replace("-", "")
+
+    def _compare_resource_constraint(self, bp: WarehouseBlueprint, row: dict):
+        if bp.resource_constraint == row["resource_constraint"]:
+            return False
+
+        # Special rules for RESOURCE_CONSTRAINT are required to take both old and new default logic into account
+        if bp.resource_constraint is None and bp.type == "STANDARD" and row["resource_constraint"] == "STANDARD_GEN_1":
+            return False
+
+        return True
 
     def _post_process(self):
         if not self.engine.context.current_warehouse:

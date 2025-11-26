@@ -1,5 +1,103 @@
 # Changelog
 
+## [0.60.0] - 2025-11-11
+
+- Replaced regular expression in `VIEW` converter with sqlglot tokenizer.
+- Introduced new category for optional dependencies: "convert". Example: `pip install snowddl[convert]`. It is only required if you plan to use converters.
+
+## [0.59.1] - 2025-10-25
+
+- Fixed issue with optional `mfa_enrollment` parameter for `AUTHENTICATION_POLICY`.
+
+## [0.59.0] - 2025-10-24
+
+- All `AUTHENTICATION_POLICY` parameters are now optional.
+- Added parameters `mfa_policy`, `pat_policy`, `workload_identity_policy` for `AUTHENTICATION POLICY`.
+- Switched `AUTHENTICATION_POLICY` to short-hash approach instead of comparing each individual parameter.
+- Switched `AUTHENTICATION_POLICY` to `CREATE OR ALTER` approach instead of `ALTER`.
+- Switched `AUTHENTICATION_POLICY` new references to `FORCE` mode instead of explicitly finding and dropping currently existing references.
+- Fixed `STAGE_FILE` path delimiter issue for existing files on Windows.
+
+## [0.58.2] - 2025-10-16
+
+- Excluded all non-standard `DATABASE` objects while processing `SHOW DATABASES` for "schema cache". It includes personal databases, inbound shares and application databases.
+
+## [0.58.1] - 2025-10-06
+
+- Removed `:` from workload identity `SUBJECT` when env prefix is empty.
+
+## [0.58.0] - 2025-10-06
+
+- Introduced `workload_identity` authenticator and relevant CLI options (thanks to @jbylina).
+- Introduced `workload_identity` parameter for `USER` object type and `--refresh-workload-identity` CLI option.
+- Made `object_type` and `object_name` mandatory for `SNAPSHOT_SET`.
+
+## [0.57.1] - 2025-09-19
+
+- Fixed typo in `SHARE` object type definition (thanks to @rex911).
+- Update AbstractRoleResolver to not transfer ownership of notebooks and shares (thanks to @rex911).
+
+## [0.57.0] - 2025-09-16
+
+- Introduced workaround for user type `NULL` being replaced with `PERSON` in bundle `2025_05`.
+- Implemented initial logic for `SNAPSHOT POLICY` and `SNAPSHOT SET` object types.
+
+## [0.56.0] - 2025-09-02
+
+- Reworked and extended drop intention cache logic to table columns.
+- Prevented generation of `DROP PRIMARY KEY`, `DROP UNIQUE KEY` and `DROP FOREIGN KEY` commands if relevant tables or columns are about to be dropped.
+- Removed unused resolver for `TAG` object type.
+
+## [0.55.1] - 2025-07-23
+
+- Prevented errors for outbound shares with organization listings.
+
+## [0.55.0] - 2025-06-26
+
+- Reworked `DYNAMIC_TABLE` to use `SHOW AS RESOURCE DYNAMIC TABLES` command.
+- Implemented additional dynamic table checks for column comments, transient, retention_time, refresh_mode.
+- Added explicit "replace reasons" comments for `DYNAMIC_TABLE`, similar to `TABLE`.
+- `TABLE` comments can now be fully "unset" to NULL instead of empty string.
+
+## [0.54.2] - 2025-06-25
+
+- Added check for `cluster_by` parameter for existing dynamic tables (thanks to gcv-epalmer).
+
+## [0.54.1] - 2025-06-24
+
+- Added `unique` parameter for `SEMANTIC_VIEW` table. Semantic views should now be fully supported.
+
+## [0.54.0] - 2025-06-11
+
+- Introduced basic `oauth` authenticator and `--oauth-token` CLI argument. It is different from currently existing `oauth_snowpark`.
+
+## [0.53.0] - 2025-05-26
+
+- Added policies for `DYNAMIC_TABLE` config.
+- Fixed incorrect object type names while dropping policy references.
+- Added CLI option `--clone-source-env-prefix`. It allowed to clone tables from another environment with env prefix. Previously it was possible to clone only from databases without prefix.
+
+## [0.52.0] - 2025-05-23
+
+- Reworked data type parsing logic for `SHOW FUNCTIONS` and `SHOW PROCEDURES` to prepare for bundle `2025_03` [changes](https://docs.snowflake.com/en/release-notes/bcr-bundles/2025_03/bcr-1944).
+- Parameter `resource_constraint` is now required for `SNOWPARK-OPTIMIZED` warehouse. It is necessary to protect from future random changes in default values.
+- Added `Active bundles` to context and logging.
+- Skipped some checks in tests until bundle `2025_03` is fully deployed. Proposed change is so problematic, I expect it to be partially reverted.
+
+## [0.51.1] - 2025-05-20
+
+- Added temporary workaround for potential new default `resource_constraint=STANDARD_GEN_1` for `STANDARD` warehouses. Previously it was `null`.
+
+## [0.51.0] - 2025-05-15
+
+- Introduced `DATABASE_ROLE` object type. Currently, it can be used for outbound shares only.
+
+## [0.50.0] - 2025-05-09
+
+- Introduced `future_grants` for technical roles.
+- Added extra validation to prevent `OWNERSHIP` privilege being assigned via technical roles.
+- Reworked mechanism of cross-checking existing grants vs. future grants defined in config. It no longer creates new objects in large quantities.
+
 ## [0.49.2] - 2025-04-23
 
 - Introduced explicit `object_type` to `source_type` mapping for `STREAM`. It should help to reduce naming inconsistency presented in output of `SHOW STREAMS` command.

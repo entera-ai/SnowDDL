@@ -100,7 +100,7 @@ class AbstractRoleResolver(AbstractResolver):
                 try:
                     grant_name = build_grant_name_ident(self.config.env_prefix, r["name"], object_type)
                 except (KeyError, ValueError):
-                    self.engine.intention_cache.add_invalid_name_warning(object_type, r["name"])
+                    self.engine.intention_cache.add_object_name_warning(object_type, r["name"])
                     continue
 
                 grants.append(
@@ -129,7 +129,7 @@ class AbstractRoleResolver(AbstractResolver):
             try:
                 grant_name = build_future_grant_name_ident(object_type, r["name"])
             except ValueError:
-                self.engine.intention_cache.add_invalid_name_warning(object_type, r["name"])
+                self.engine.intention_cache.add_object_name_warning(object_type, r["name"])
                 continue
 
             future_grants.append(
@@ -208,7 +208,7 @@ class AbstractRoleResolver(AbstractResolver):
 
         # Normal grants
         for existing_grant in row["grants"]:
-            if existing_grant not in bp.grants and self.grant_to_future_grant(existing_grant) not in bp.future_grants:
+            if existing_grant not in bp.grants and not any(fg.is_matching_grant(existing_grant) for fg in bp.future_grants):
                 self.drop_grant(bp.full_name, existing_grant)
                 result = ResolveResult.GRANT
 
@@ -281,9 +281,10 @@ class AbstractRoleResolver(AbstractResolver):
         # OWNERSHIP can only be transferred, not revoked
         # We transfer ownership back to default "SnowDDL admin" role instead of REVOKE
         if grant.privilege == "OWNERSHIP":
-            # Changing ownership of notebooks is not supported by Snowflake
+            # Changing ownership of notebooks and shares is not supported by Snowflake
             # https://docs.snowflake.com/en/user-guide/ui-snowsight/notebooks-limitations
-            if grant.on == ObjectType.NOTEBOOK:
+            # https://docs.snowflake.com/en/sql-reference/sql/grant-ownership#usage-notes
+            if grant.on in (ObjectType.NOTEBOOK, ObjectType.SHARE):
                 return
 
             self.engine.execute_safe_ddl(
@@ -373,11 +374,6 @@ class AbstractRoleResolver(AbstractResolver):
                 "copy_grants": " COPY CURRENT GRANTS" if (grant.privilege == "OWNERSHIP") else "",
             },
         )
-
-    def grant_to_future_grant(self, grant: Grant):
-        # Overloaded in Database and Schema role resolvers
-        # Other role types are not expected to utilize furue grants
-        return None
 
     def build_database_role_grants(self, database_name_pattern: IdentPattern, role_type: str) -> List[Grant]:
         grants = []

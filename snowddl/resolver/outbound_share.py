@@ -77,7 +77,7 @@ class OutboundShareResolver(AbstractResolver):
                 result = ResolveResult.GRANT
 
         for ex_grant in existing_grants:
-            if not any (grant_pattern.is_matching_grant(ex_grant) for grant_pattern in bp.grant_patterns):
+            if not any(grant_pattern.is_matching_grant(ex_grant) for grant_pattern in bp.grant_patterns):
                 self.drop_grant(bp.full_name, ex_grant)
                 result = ResolveResult.GRANT
 
@@ -126,6 +126,9 @@ class OutboundShareResolver(AbstractResolver):
 
             if row:
                 for r in json_loads(row["DETAILS"]):
+                    if "TARGETED WITHIN ORGANIZATION" in r["account_name"]:
+                        continue
+
                     existing_accounts.append(AccountIdent(*r["account_name"].split(".", 2)))
 
         for account in bp.accounts:
@@ -168,28 +171,51 @@ class OutboundShareResolver(AbstractResolver):
         return len(accounts_to_add) > 0 or len(accounts_to_remove) > 0
 
     def create_grant(self, share_name, grant: Grant):
-        self.engine.execute_unsafe_ddl(
-            "GRANT {privilege:r} ON {on:r} {name:i} TO SHARE {share_name:i}",
-            {
-                "privilege": grant.privilege,
-                "on": grant.on.singular,
-                "name": grant.name,
-                "share_name": share_name,
-            },
-            condition=self.engine.settings.execute_outbound_share,
-        )
+        if grant.privilege == "USAGE" and grant.on == ObjectType.DATABASE_ROLE:
+            self.engine.execute_unsafe_ddl(
+                "GRANT {on:r} {name:i} TO SHARE {share_name:i}",
+                {
+                    "on": grant.on.singular_for_grant,
+                    "name": grant.name,
+                    "share_name": share_name,
+                },
+                condition=self.engine.settings.execute_outbound_share,
+            )
+        else:
+            self.engine.execute_unsafe_ddl(
+                "GRANT {privilege:r} ON {on:r} {name:i} TO SHARE {share_name:i}",
+                {
+                    "privilege": grant.privilege,
+                    "on": grant.on.singular,
+                    "name": grant.name,
+                    "share_name": share_name,
+                },
+                condition=self.engine.settings.execute_outbound_share,
+            )
 
     def drop_grant(self, share_name, grant: Grant):
-        self.engine.execute_unsafe_ddl(
-            "REVOKE {privilege:r} ON {on:r} {name:i} FROM SHARE {share_name:i}",
-            {
-                "privilege": grant.privilege,
-                "on": grant.on.singular,
-                "name": grant.name,
-                "share_name": share_name,
-            },
-            condition=self.engine.settings.execute_outbound_share,
-        )
+        if grant.privilege == "USAGE" and grant.on == ObjectType.DATABASE_ROLE:
+            self.engine.execute_unsafe_ddl(
+                "REVOKE {on:r} {name:i} FROM SHARE {share_name:i}",
+                {
+                    "privilege": grant.privilege,
+                    "on": grant.on.singular,
+                    "name": grant.name,
+                    "share_name": share_name,
+                },
+                condition=self.engine.settings.execute_outbound_share,
+            )
+        else:
+            self.engine.execute_unsafe_ddl(
+                "REVOKE {privilege:r} ON {on:r} {name:i} FROM SHARE {share_name:i}",
+                {
+                    "privilege": grant.privilege,
+                    "on": grant.on.singular,
+                    "name": grant.name,
+                    "share_name": share_name,
+                },
+                condition=self.engine.settings.execute_outbound_share,
+            )
 
     def get_existing_share_grants(self, share_name):
         grants = []

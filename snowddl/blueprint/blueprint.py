@@ -12,7 +12,7 @@ from .column import (
     SearchOptimizationItem,
 )
 from .data_type import DataType
-from .grant import AccountGrant, Grant, FutureGrant, GrantPattern
+from .grant import AccountGrant, Grant, FutureGrant, GrantPattern, FutureGrantPattern
 from .ident import (
     AbstractIdent,
     Ident,
@@ -84,11 +84,14 @@ class AlertBlueprint(SchemaObjectBlueprint):
 
 
 class AuthenticationPolicyBlueprint(SchemaObjectBlueprint):
-    authentication_methods: List[str]
-    mfa_authentication_methods: List[str]
-    mfa_enrollment: str
-    client_types: List[str]
-    security_integrations: List[str]
+    authentication_methods: Optional[List[str]] = None
+    mfa_authentication_methods: Optional[List[str]] = None
+    mfa_enrollment: Optional[str] = None
+    mfa_policy: Optional[Dict[str, Union[bool, float, int, str, list]]] = None
+    client_types: Optional[List[str]] = None
+    security_integrations: Optional[List[str]] = None
+    pat_policy: Optional[Dict[str, Union[bool, float, int, str, list]]] = None
+    workload_identity_policy: Optional[Dict[str, Union[bool, float, int, str, list]]] = None
     references: List[AuthenticationPolicyReference] = []
 
 
@@ -124,6 +127,11 @@ class DatabaseBlueprint(AbstractBlueprint):
     owner_global_roles: List[Ident] = []
     copy_schema_role_grants_to_db_clones: List[str] = []
     schema_roles: Union[dict, List[str], bool] = []
+
+
+class DatabaseRoleBlueprint(AbstractBlueprint):
+    full_name: DatabaseRoleIdent
+    grant_patterns: List[GrantPattern] = []
 
 
 class DynamicTableBlueprint(SchemaObjectBlueprint, DependsOnMixin):
@@ -372,6 +380,17 @@ class SequenceBlueprint(SchemaObjectBlueprint):
     is_ordered: Optional[bool] = None
 
 
+class SnapshotPolicyBlueprint(SchemaObjectBlueprint):
+    schedule: Optional[str] = None
+    expire_after_days: Optional[int] = None
+
+
+class SnapshotSetBlueprint(SchemaObjectBlueprint):
+    object_type: ObjectType
+    object_name: Union[DatabaseIdent, SchemaIdent, SchemaObjectIdent]
+    snapshot_policy: Optional[SchemaObjectIdent] = None
+
+
 class StageBlueprint(SchemaObjectBlueprint):
     url: Optional[str] = None
     storage_integration: Optional[Ident] = None
@@ -438,6 +457,7 @@ class TaskBlueprint(SchemaObjectBlueprint, DependsOnMixin):
 class TechnicalRoleBlueprint(AbstractBlueprint):
     full_name: AccountObjectIdent
     grant_patterns: List[GrantPattern] = []
+    future_grant_patterns: List[FutureGrantPattern] = []
     account_grants: List[AccountGrant] = []
 
 
@@ -463,6 +483,7 @@ class UserBlueprint(AbstractBlueprint):
     default_warehouse: Optional[AccountObjectIdent] = None
     default_namespace: Optional[Union[DatabaseIdent, SchemaIdent]] = None
     session_params: Dict[str, Union[bool, float, int, str]] = {}
+    workload_identity: Optional[Dict[str, Union[bool, float, int, str, list]]] = None
 
 
 class ViewBlueprint(SchemaObjectBlueprint, DependsOnMixin):

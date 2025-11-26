@@ -79,6 +79,7 @@ class TableResolver(AbstractSchemaObjectResolver):
         bp_cols = {str(c.name): c for c in bp.columns}
         snow_cols = self._get_existing_columns(bp)
 
+        dropping_col_names = []
         remaining_col_names = list(snow_cols.keys())
 
         for col_name, snow_c in snow_cols.items():
@@ -93,7 +94,9 @@ class TableResolver(AbstractSchemaObjectResolver):
                     )
                 )
 
+                dropping_col_names.append(col_name)
                 remaining_col_names.remove(col_name)
+
                 replace_notices.append(f"Column {col_name} is about to be dropped")
                 continue
 
@@ -165,16 +168,25 @@ class TableResolver(AbstractSchemaObjectResolver):
 
             # Comments
             if snow_c.comment != bp_c.comment:
-                # UNSET COMMENT is currently not supported for columns, we can only set it to empty string
-                safe_alters.append(
-                    self.engine.format(
-                        "MODIFY COLUMN {col_name:i} COMMENT {comment}",
-                        {
-                            "col_name": col_name,
-                            "comment": bp_c.comment if bp_c.comment else "",
-                        },
+                if bp_c.comment:
+                    safe_alters.append(
+                        self.engine.format(
+                            "MODIFY COLUMN {col_name:i} COMMENT {comment}",
+                            {
+                                "col_name": col_name,
+                                "comment": bp_c.comment,
+                            },
+                        )
                     )
-                )
+                else:
+                    safe_alters.append(
+                        self.engine.format(
+                            "MODIFY COLUMN {col_name:i} UNSET COMMENT",
+                            {
+                                "col_name": col_name,
+                            },
+                        )
+                    )
 
             # If type matches exactly, skip all other checks
             if snow_c.type == bp_c.type:
@@ -266,7 +278,7 @@ class TableResolver(AbstractSchemaObjectResolver):
         if bp.is_transient is True and row["is_transient"] is False:
             replace_reasons.append("Table type was changed to TRANSIENT")
         elif bp.is_transient is False and row["is_transient"] is True:
-            replace_reasons.append("Table type was changed to no longer being TRANSIENT")
+            replace_reasons.append("Table type was changed to PERMANENT")
 
         # Retention time
         if bp.retention_time is not None and bp.retention_time != row["retention_time"]:
@@ -344,6 +356,9 @@ class TableResolver(AbstractSchemaObjectResolver):
                 )
 
             result = ResolveResult.ALTER
+
+            for col_name in dropping_col_names:
+                self.engine.intention_cache.add_column_drop_intention(str(bp.full_name), col_name)
 
         # If table was re-created, apply or suggest search optimization using exactly the same condition value
         if result == ResolveResult.REPLACE:
