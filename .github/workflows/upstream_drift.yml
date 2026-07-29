@@ -1,0 +1,235 @@
+# Early warning for drift between this fork and littleK0i/SnowDDL.
+#
+# Reports how far behind master is, which upstream releases we are missing, and
+# which files would conflict on the next rebase. Read-only: it never touches
+# Snowflake.
+#
+# NON-GOALS (hard constraints):
+#   - Never run `snowddl plan` or invoke the snowddl CLI in any form.
+#   - Never auto-create rebase branches or pull requests. The upgrade stays
+#     human-driven; this workflow only tells a human when to start one.
+#
+# Delivery: GitHub step summary + a single upserted tracking issue. Slack
+# delivery is an open epic decision; these two channels are the interim answer
+# (this repo is public and holds zero secrets, so no webhook is available).
+
+name: Upstream drift report
+
+on:
+  schedule:
+    - cron: "0 13 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UPSTREAM_URL: https://github.com/littleK0i/SnowDDL.git
+      ISSUE_MARKER: "<!-- upstream-drift-report -->"
+      CUSTOMIZED_FILES: >-
+        snowddl/blueprint/blueprint.py
+        snowddl/parser/database.py
+        snowddl/parser/schema.py
+        snowddl/resolver/abc_role_resolver.py
+        snowddl/resolver/schema_owner_role.py
+        snowddl/resolver/schema_read_role.py
+        snowddl/resolver/schema_write_role.py
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        run: |
+          set -euo pipefail
+          git remote add upstream "$UPSTREAM_URL"
+          git fetch --no-tags upstream master
+
+      - name: Collect version and commit facts
+        run: |
+          set -euo pipefail
+
+          fork_version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' snowddl/version.py)
+          upstream_head_version=$(git show upstream/master:snowddl/version.py | sed -n 's/^__version__ = "\(.*\)"$/\1/p')
+
+          # Upstream publishes no tags and no GitHub releases, so PyPI is the
+          # only stable version stream.
+          upstream_pypi_version=$(curl -fsSL https://pypi.org/pypi/snowddl/json | jq -r '.info.version')
+          if ! printf '%s' "$upstream_pypi_version" | grep -qE '^[0-9]+(\.[0-9]+)*$'; then
+            echo "PyPI returned a non-stable version: $upstream_pypi_version" >&2
+            exit 1
+          fi
+
+          read -r ahead behind < <(git rev-list --left-right --count HEAD...upstream/master)
+
+          {
+            echo "FORK_VERSION=$fork_version"
+            echo "UPSTREAM_HEAD_VERSION=$upstream_head_version"
+            echo "UPSTREAM_PYPI_VERSION=$upstream_pypi_version"
+            echo "COMMITS_AHEAD=$ahead"
+            echo "COMMITS_BEHIND=$behind"
+            echo "UPSTREAM_HEAD_SHA=$(git rev-parse --short upstream/master)"
+            echo "MERGE_BASE=$(git merge-base HEAD upstream/master)"
+          } >> "$GITHUB_ENV"
+
+      - name: Extract changelog sections we are missing
+        run: |
+          set -euo pipefail
+
+          # Upstream CHANGELOG.md is newest-first with headings "## [X.Y.Z] - DATE".
+          git show upstream/master:CHANGELOG.md > "$RUNNER_TEMP/upstream_changelog.md"
+
+          # From the latest release (inclusive) down to our version (exclusive).
+          awk -v start="## [$UPSTREAM_PYPI_VERSION]" -v stop="## [$FORK_VERSION]" '
+            index($0, stop) == 1 { exit }
+            index($0, start) == 1 { on = 1 }
+            on { print }
+          ' "$RUNNER_TEMP/upstream_changelog.md" > "$RUNNER_TEMP/changelog_full.md"
+
+          # Fall back to "everything newer than our version" if the PyPI release
+          # has no changelog heading yet.
+          if [ ! -s "$RUNNER_TEMP/changelog_full.md" ]; then
+            awk -v stop="## [$FORK_VERSION]" '
+              index($0, stop) == 1 { exit }
+              /^## \[/ { on = 1 }
+              on { print }
+            ' "$RUNNER_TEMP/upstream_changelog.md" > "$RUNNER_TEMP/changelog_full.md"
+          fi
+
+          releases_behind=$(grep -c '^## \[' "$RUNNER_TEMP/changelog_full.md" || true)
+
+          # Demote release headings so they nest under our own report sections.
+          sed 's/^## \[/#### [/' "$RUNNER_TEMP/changelog_full.md" > "$RUNNER_TEMP/changelog_demoted.md"
+          mv "$RUNNER_TEMP/changelog_demoted.md" "$RUNNER_TEMP/changelog_full.md"
+
+          head -c 3000 "$RUNNER_TEMP/changelog_full.md" > "$RUNNER_TEMP/changelog.md"
+          if [ "$(wc -c < "$RUNNER_TEMP/changelog_full.md")" -gt 3000 ]; then
+            echo "" >> "$RUNNER_TEMP/changelog.md"
+            echo "_(truncated - see upstream CHANGELOG.md for the rest)_" >> "$RUNNER_TEMP/changelog.md"
+          fi
+
+          echo "RELEASES_BEHIND=${releases_behind:-0}" >> "$GITHUB_ENV"
+
+      - name: Merge dry run
+        run: |
+          set -euo pipefail
+
+          # Throwaway merge in a disposable checkout, purely to list conflicts.
+          git -c user.name=drift-check -c user.email=drift@localhost \
+            merge --no-commit --no-ff upstream/master || true
+
+          git diff --name-only --diff-filter=U > "$RUNNER_TEMP/conflicted_files.txt"
+          conflict_count=$(wc -l < "$RUNNER_TEMP/conflicted_files.txt" | tr -d ' ')
+
+          : > "$RUNNER_TEMP/conflicts.md"
+          if [ "$conflict_count" -eq 0 ]; then
+            echo "No merge conflicts. A rebase onto upstream/master should apply cleanly." >> "$RUNNER_TEMP/conflicts.md"
+          else
+            echo "| File | Conflict hunks |" >> "$RUNNER_TEMP/conflicts.md"
+            echo "| --- | --- |" >> "$RUNNER_TEMP/conflicts.md"
+            while read -r file; do
+              hunks=$(grep -c '^<<<<<<<' "$file" || true)
+              echo "| \`$file\` | ${hunks:-0} |" >> "$RUNNER_TEMP/conflicts.md"
+            done < "$RUNNER_TEMP/conflicted_files.txt"
+          fi
+
+          git merge --abort || git reset --hard HEAD
+
+          echo "CONFLICT_COUNT=$conflict_count" >> "$GITHUB_ENV"
+
+      - name: Measure pressure on entera-customized files
+        run: |
+          set -euo pipefail
+
+          {
+            echo "| Entera-customized file | Upstream commits since fork point |"
+            echo "| --- | --- |"
+          } > "$RUNNER_TEMP/pressure.md"
+
+          for file in $CUSTOMIZED_FILES; do
+            count=$(git rev-list --count "$MERGE_BASE..upstream/master" -- "$file")
+            echo "| \`$file\` | $count |" >> "$RUNNER_TEMP/pressure.md"
+          done
+
+      - name: Render report
+        run: |
+          set -euo pipefail
+
+          {
+            echo "$ISSUE_MARKER"
+            echo "## SnowDDL fork drift vs littleK0i/SnowDDL"
+            echo ""
+            echo "Generated by [\`upstream_drift.yml\`](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}) on $(date -u '+%Y-%m-%d %H:%M UTC')."
+            echo ""
+            echo "### Version gap"
+            echo ""
+            echo "| | Version |"
+            echo "| --- | --- |"
+            echo "| Fork (\`snowddl/version.py\` on master) | \`$FORK_VERSION\` |"
+            echo "| Upstream latest stable (PyPI) | \`$UPSTREAM_PYPI_VERSION\` |"
+            echo "| Upstream \`master\` HEAD (\`$UPSTREAM_HEAD_SHA\`) | \`$UPSTREAM_HEAD_VERSION\` |"
+            echo ""
+            echo "- Commits behind upstream: **$COMMITS_BEHIND**"
+            echo "- Commits ahead (entera edits): **$COMMITS_AHEAD**"
+            echo "- Upstream releases behind: **$RELEASES_BEHIND**"
+            echo ""
+            echo "### Merge conflicts if we rebased today ($CONFLICT_COUNT file(s))"
+            echo ""
+            cat "$RUNNER_TEMP/conflicts.md"
+            echo ""
+            echo "### Upstream churn in files we customized"
+            echo ""
+            cat "$RUNNER_TEMP/pressure.md"
+            echo ""
+            echo "### Upstream changelog we are missing"
+            echo ""
+            cat "$RUNNER_TEMP/changelog.md"
+            echo ""
+            echo "### Manual upgrade process"
+            echo ""
+            echo "The rebase is deliberately human-driven. To start one:"
+            echo ""
+            echo '```bash'
+            echo "git fetch upstream master"
+            echo "git checkout -b snowddl-upstream-release-$UPSTREAM_PYPI_VERSION $UPSTREAM_HEAD_SHA"
+            echo "git push -u origin snowddl-upstream-release-$UPSTREAM_PYPI_VERSION"
+            echo "gh pr create --repo ${GITHUB_REPOSITORY} \\"
+            echo "  --base master --head snowddl-upstream-release-$UPSTREAM_PYPI_VERSION \\"
+            echo "  --title 'Upstream release $UPSTREAM_PYPI_VERSION'"
+            echo '```'
+            echo ""
+            echo "Conflicts surface in that PR and are resolved by hand. After merging, tag the"
+            echo "result \`upstream-release-$UPSTREAM_PYPI_VERSION-entera-edit-<A.B.C>\` and bump the pin in"
+            echo "\`analytics/snowddl/Dockerfile\`."
+          } > "$RUNNER_TEMP/report.md"
+
+          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upsert tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # Match on the hidden marker instead of the title, so a renamed issue
+          # is still found. Done client-side: GitHub search does not index the
+          # contents of HTML comments.
+          # shellcheck disable=SC2016 # $ENV is jq syntax, not shell
+          issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,body \
+            --jq 'map(select(.body | contains($ENV.ISSUE_MARKER))) | .[0].number // empty')
+
+          if [ -n "$issue" ]; then
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/report.md"
+            echo "Updated issue #$issue"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Upstream drift report" --body-file "$RUNNER_TEMP/report.md"
+          fi
