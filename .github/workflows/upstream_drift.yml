@@ -9,9 +9,11 @@
 #   - Never auto-create rebase branches or pull requests. The upgrade stays
 #     human-driven; this workflow only tells a human when to start one.
 #
-# Delivery: GitHub step summary + a single upserted tracking issue. Slack
-# delivery is an open epic decision; these two channels are the interim answer
-# (this repo is public and holds zero secrets, so no webhook is available).
+# Delivery: three channels. The GitHub step summary and a single upserted
+# tracking issue carry the full report. A light Slack alert carries only the
+# headline numbers and the two links, so the rich report has exactly one home.
+# The Slack channel needs the DATA_UPDATES_SLACK_WEBHOOK_URL secret; while that
+# secret is absent the post step no-ops with a warning and the run stays green.
 
 name: Upstream drift report
 
@@ -19,6 +21,11 @@ on:
   schedule:
     - cron: "0 13 * * 1"
   workflow_dispatch:
+    inputs:
+      force_post:
+        description: "Post to Slack even when no drift is detected"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -237,3 +244,42 @@ jobs:
           fi
 
           echo "ISSUE_URL=$issue_url" >> "$GITHUB_ENV"
+
+      - name: Post the drift alert to Slack
+        env:
+          DATA_UPDATES_SLACK_WEBHOOK_URL: ${{ secrets.DATA_UPDATES_SLACK_WEBHOOK_URL }}
+          FORCE_POST: ${{ inputs.force_post }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Drift-only, so a quiet week stays quiet. force_post is the manual
+          # override that proves the delivery path still works.
+          if [ "$CONFLICT_COUNT" -eq 0 ] && [ "$COMMITS_BEHIND" -eq 0 ] && [ "${FORCE_POST:-false}" != "true" ]; then
+            echo "No drift and force_post is off; skipping the Slack post."
+            exit 0
+          fi
+
+          if [ -z "${DATA_UPDATES_SLACK_WEBHOOK_URL:-}" ]; then
+            echo "::warning::DATA_UPDATES_SLACK_WEBHOOK_URL is not configured; skipping the Slack post. The full report is in the run summary and the tracking issue."
+            exit 0
+          fi
+
+          # Seven facts and nothing else. The changelog, the conflict table and
+          # the pressure table stay in the tracking issue.
+          {
+            echo "*SnowDDL fork drift* - fork \`$FORK_VERSION\`, upstream latest stable \`$UPSTREAM_PYPI_VERSION\`"
+            echo "- Commits behind upstream: $COMMITS_BEHIND"
+            echo "- Upstream releases behind: $RELEASES_BEHIND"
+            echo "- Files that would conflict on a rebase: $CONFLICT_COUNT"
+            echo "- Full report: ${ISSUE_URL:-unavailable}"
+            echo "- Run: $RUN_URL"
+          } > "$RUNNER_TEMP/slack.md"
+
+          # Delivery is best-effort: the same facts are already in the run
+          # summary and the tracking issue. Failing here would make the job read
+          # as "the fork was not checked", which is the one thing it must not say.
+          if ! jq -n --rawfile text "$RUNNER_TEMP/slack.md" '{text: $text}' \
+            | curl -fsS -X POST -H 'Content-type: application/json' --data @- "$DATA_UPDATES_SLACK_WEBHOOK_URL"; then
+            echo "::warning::The Slack post failed. The drift check itself succeeded; the report is in the run summary and the tracking issue: $RUN_URL"
+          fi
