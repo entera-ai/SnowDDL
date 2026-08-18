@@ -229,7 +229,11 @@ jobs:
           if [ -n "$issue" ]; then
             gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/report.md"
             echo "Updated issue #$issue"
+            issue_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/issues/$issue"
           else
-            gh issue create --repo "$GITHUB_REPOSITORY" \
-              --title "Upstream drift report" --body-file "$RUNNER_TEMP/report.md"
+            # gh issue create prints the URL of the new issue on stdout.
+            issue_url=$(gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "Upstream drift report" --body-file "$RUNNER_TEMP/report.md")
           fi
+
+          echo "ISSUE_URL=$issue_url" >> "$GITHUB_ENV"
